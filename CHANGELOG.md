@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.61.1](https://github.com/open-artifacts-ai/open-bus/compare/v0.61.0...v0.61.1) (2026-11-01)
+
+
+### Bug Fixes
+
+* **daemon:** attest Codex code-mode calls (C27) ([#384](https://github.com/open-artifacts-ai/open-bus/issues/384)) ([ec25ffb](https://github.com/open-artifacts-ai/open-bus/commit/ec25ffbb8c01932c15284bd684674e76c011b117))
+
 ## [0.61.0](https://github.com/open-artifacts-ai/open-bus/compare/v0.60.0...v0.61.0) (2026-10-29)
 
 
