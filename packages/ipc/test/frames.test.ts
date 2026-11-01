@@ -267,6 +267,26 @@ describe("codex hello facts (C26b)", () => {
     expect(AdapterFrame.safeParse({ ...noCwd, codex }).success).toBe(true);
   });
 
+  it("carries a code-mode call's item and turn ids, which an older daemon strips (C27)", () => {
+    const code = {
+      ...codex,
+      call_id: "exec-0b5c2a8e-3f1d-4c6a-9e2b-7d4f1a3c5e6b",
+      item_id: "ctc_synthetic01",
+      turn_id: "019a2b3c-0000-7f60-8a9b-0c1d2e3f4a5b",
+    };
+    expect(Hello.parse({ ...base, codex: code }).codex).toEqual(code);
+    const older = Hello.extend({
+      codex: Hello.shape.codex
+        .unwrap()
+        .omit({ item_id: true, turn_id: true })
+        .optional(),
+    });
+    expect(older.parse({ ...base, codex: code }).codex).toEqual({
+      ...codex,
+      call_id: code.call_id,
+    });
+  });
+
   it("refuses a partial or odd codex block", () => {
     for (const bad of [
       { ...codex, call_id: "" },
@@ -275,6 +295,8 @@ describe("codex hello facts (C26b)", () => {
       { ...codex, thread_id: "../etc" },
       { ...codex, thread_source: "" },
       { ...codex, thread_source: "x".repeat(65) },
+      { ...codex, item_id: "" },
+      { ...codex, turn_id: "x".repeat(257) },
     ])
       expect(Hello.safeParse({ ...base, codex: bad }).success).toBe(false);
   });
