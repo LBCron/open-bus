@@ -162,11 +162,39 @@ describe("the codex MCP adapter", () => {
           call_id: "call_3",
           ppid: 4000,
           thread_source: "user",
+          item_id: "fc_3",
+          turn_id: "01a184f2-1569-79a2-8399-f0ac163ff023",
         },
       },
       expect.objectContaining({
         codex: expect.objectContaining({ call_id: "call_4" }),
       }),
+    ]);
+  });
+
+  it("a code-mode call sends its exec item id and turn; none when Codex sent none (C27)", async () => {
+    const d = await fakeDaemon();
+    const { call } = await codex(d.path);
+    const exec = "exec-0b5c2a8e-3f1d-4c6a-9e2b-7d4f1a3c5e6b";
+    await call({ ...meta({ call: exec }), itemId: "ctc_synthetic01" });
+    const { itemId: _, ...bare } = meta({ call: exec });
+    await call(bare);
+    expect(d.hellos.map((h) => h.codex)).toEqual([
+      {
+        thread_id: THREAD,
+        call_id: exec,
+        ppid: 4000,
+        thread_source: "user",
+        item_id: "ctc_synthetic01",
+        turn_id: "01a184f2-1569-79a2-8399-f0ac163ff023",
+      },
+      {
+        thread_id: THREAD,
+        call_id: exec,
+        ppid: 4000,
+        thread_source: "user",
+        turn_id: "01a184f2-1569-79a2-8399-f0ac163ff023",
+      },
     ]);
   });
 
@@ -309,6 +337,8 @@ describe("the codex MCP adapter", () => {
       callId: "call_3",
       threadSource: "user",
       cwd: "/repo/sub",
+      itemId: "fc_3",
+      turnId: "01a184f2-1569-79a2-8399-f0ac163ff023",
     });
     const m = meta();
     expect(
@@ -318,6 +348,8 @@ describe("the codex MCP adapter", () => {
       callId: "call_3",
       threadSource: "user",
       cwd: WORK,
+      itemId: "fc_3",
+      turnId: "01a184f2-1569-79a2-8399-f0ac163ff023",
     });
   });
 
@@ -399,12 +431,16 @@ describe("set_status and card in codex mode (AC5b)", () => {
         call_id: "call_7",
         ppid: 4000,
         thread_source: "user",
+        item_id: "fc_3",
+        turn_id: "01a184f2-1569-79a2-8399-f0ac163ff023",
       },
       {
         thread_id: THREAD,
         call_id: "call_8",
         ppid: 4000,
         thread_source: "user",
+        item_id: "fc_3",
+        turn_id: "01a184f2-1569-79a2-8399-f0ac163ff023",
       },
     ]);
     expect(d.conns.map((c) => c.frames.map((f) => f.type))).toEqual([
