@@ -189,6 +189,56 @@ the user's trust in that thread. The other harnesses have the same same-user
 limit: the daemon has no peer credentials, so `hello.pid` is a claim, which
 is why a codex connection is bound to its one call.
 
+**Code mode (C27, #343), 2026-11-01.** Codex chooses code mode per model
+(`tool_mode: "code_mode_only"` in the model catalog, on by ~0.145 for newer
+models; or `[features] code_mode_only`), so the CLI and TUI use it too, not
+only the desktop app. The model then emits a `custom_tool_call` named `exec`
+whose JavaScript calls `tools.<name>(…)`, and every OpenBus call is a nested
+`tools/call`. Source: openai/codex `rust-v0.166.0-alpha.5.1`
+(`.superpowers/sdd/05-client/c27-probe-report.md`).
+
+- `_meta.callId` is a fresh `exec-<uuid>` per nested call. The rollout never
+  has it at request time; Codex writes it only afterwards, as the
+  `item_completed` `McpToolCall` item id.
+- `_meta.itemId` is the outer `exec` line's `payload.id` (`ctc_…`), written
+  to the rollout before dispatch, as a `function_call` is. It is the binding.
+- One exec can make many calls, and they share one `itemId`.
+
+The adapter sends `item_id` (`_meta.itemId`) and `turn_id` (the turn
+metadata's) in the hello. When no open `function_call` matches `call_id`, the
+daemon accepts only if all of the following hold (steps 1, 2 and 4 above are
+unchanged):
+
+1. The rollout has a `response_item` `custom_tool_call` with `payload.id ==
+   item_id`, `name == "exec"` and no `namespace`.
+2. Its turn (`internal_chat_message_metadata_passthrough.turn_id`) is the
+   hello's `turn_id` and the thread's latest: the last `task_started` turn
+   that has not ended.
+3. It is open: no `*_output` or `*_end` for its `call_id`, and its turn has
+   not ended.
+4. Its timestamp is at or after P's start + 1 s.
+5. `call_id` matches `^exec-[0-9a-f-]{36}$`, has not been used, and Codex has
+   not reported it done (`item_completed`); `item_id` has not been used.
+
+One hello per exec: a second OpenBus call in the same exec is refused with
+"this exec already made an OpenBus call. Make each OpenBus call in its own
+exec." This keeps the strength at one use per model-written item, as with a
+`function_call`.
+
+**Residuals (code mode):**
+
+- Refused, by design (fail closed): a second OpenBus call in one exec; a call
+  after the exec yielded (`yield_control()`, the yield timeout) or after
+  `notify()` wrote an output for it, since the exec then reads as closed; a
+  call resumed by `wait` in a later turn; a turn whose `task_started` is more
+  than 8 MB back in the rollout (no latest turn is known).
+- An exec's `input` naming `mcp__openbus__` would narrow further, but it is
+  not checked: dynamic names (`tools[name]`, `ALL_TOOLS`) never spell it.
+- Single use is per daemon lifetime, as for `call_id` today.
+- The e2e (`pnpm e2e:codex`, "codex exec in code mode") switches 0.165 into
+  code mode with `-c features.code_mode_only=true`; the fake model emits the
+  `exec` calls.
+
 ## 3. Wake
 
 **`codex queue --thread <id> --message <text>` wakes an idle thread.** It
