@@ -104,15 +104,17 @@ function codexHome(
   opts: {
     rollout?: string;
     db?: false | { source?: string; path?: string };
+    thread?: string;
   } = {},
 ): Home {
+  const thread = opts.thread ?? THREAD;
   const home = mkdtempSync(join(tmpdir(), "ob-codex-"));
   mkdirSync(join(home, "thread-writer-locks"));
-  const lock = join(home, "thread-writer-locks", `${THREAD}.lock`);
+  const lock = join(home, "thread-writer-locks", `${thread}.lock`);
   writeFileSync(lock, "");
   const day = join(home, "sessions", "2026", "10", "29");
   mkdirSync(day, { recursive: true });
-  const rollout = join(day, `rollout-2026-10-29T02-11-43-${THREAD}.jsonl`);
+  const rollout = join(day, `rollout-2026-10-29T02-11-43-${thread}.jsonl`);
   writeFileSync(rollout, opts.rollout ?? AT_CALL);
   if (opts.db !== false) {
     const db = new DatabaseSync(join(home, "state_5.sqlite"));
@@ -122,7 +124,7 @@ function codexHome(
     );
     db.prepare(
       "INSERT INTO threads VALUES (?, ?, ?, 'codex_exec', ?, 0, NULL)",
-    ).run(THREAD, opts.db?.path ?? rollout, opts.db?.source ?? "exec", CWD);
+    ).run(thread, opts.db?.path ?? rollout, opts.db?.source ?? "exec", CWD);
     db.close();
   }
   return { home, rollout, lock };
@@ -664,6 +666,258 @@ async function fakeCodex(
   procs.push({ kill: () => process.kill(adapter, "SIGKILL") } as ChildProcess);
   return { p: proc.pid as number, adapter };
 }
+
+/** Synthetic: a code-mode turn whose `exec` (item ctc_synthetic01) is in flight. */
+const CODE_MODE = fixture("codex-rollout-code-mode.jsonl");
+const TURN = "01a18536-c0de-7000-8000-00000000c0de";
+/** Synthetic: no capture's thread. */
+const CM_THREAD = "01a18536-c0de-7000-8000-0000000000aa";
+const cmHome = (rollout = CODE_MODE) =>
+  codexHome({ rollout, thread: CM_THREAD });
+const cmMeta = () => meta({ id: CM_THREAD, session_id: CM_THREAD });
+const EXEC1 = "exec-0b5c2a8e-3f1d-4c6a-9e2b-7d4f1a3c5e6b";
+const EXEC2 = "exec-6a1e9f30-2c4b-4d8e-b7a5-1f0c3e9d2b84";
+/** A code-mode exec call, as the probe's custom_tool_call shape. */
+const exec = (
+  id: string,
+  call_id: string,
+  turn = TURN,
+  timestamp?: string,
+  over: object = {},
+) =>
+  line(
+    "response_item",
+    {
+      type: "custom_tool_call",
+      id,
+      status: "completed",
+      call_id,
+      name: "exec",
+      input: "await tools.mcp__openbus__list_agents({});",
+      internal_chat_message_metadata_passthrough: { turn_id: turn },
+      ...over,
+    },
+    timestamp,
+  );
+const execOutput = (call_id: string) =>
+  line("response_item", {
+    type: "custom_tool_call_output",
+    call_id,
+    output: "done",
+  });
+const turnEv = (type: string, turn_id = TURN) =>
+  line("event_msg", { type, turn_id });
+const codeHello = (over: Partial<NonNullable<Hello["codex"]>> = {}) =>
+  codexHello(
+    {
+      thread_id: CM_THREAD,
+      call_id: EXEC1,
+      item_id: "ctc_synthetic01",
+      turn_id: TURN,
+      ...over,
+    },
+    { agent_ref: CM_THREAD },
+  );
+
+describe("codex code-mode attestation (C27)", () => {
+  const ok = { ok: true, cwd: CWD, pid: 100 };
+  const no = { ok: false, reason: CODEX_REFUSALS.callNotFound };
+  const once = { ok: false, reason: CODEX_REFUSALS.oneExec };
+
+  it("accepts a call from an open exec in the thread's latest turn", async () => {
+    const { home } = cmHome();
+    const check = codexAttestor({ home, ...fakeProcs() });
+    expect(check.attestNow(codeHello())).toEqual(ok);
+  });
+
+  it("refuses a second OpenBus call from the same exec, telling the agent to use its own", async () => {
+    const { home, rollout } = cmHome();
+    const check = codexAttestor({ home, ...fakeProcs() });
+    expect(check.attestNow(codeHello())).toEqual(ok);
+    expect(check.attestNow(codeHello({ call_id: EXEC2 }))).toEqual(once);
+    expect(CODEX_REFUSALS.oneExec).toBe(
+      "this exec already made an OpenBus call. Make each OpenBus call in its own exec.",
+    );
+    // The next exec gets its one call.
+    appendFileSync(rollout, exec("ctc_synthetic02", "call_exec2"));
+    expect(
+      check.attestNow(
+        codeHello({ call_id: EXEC2, item_id: "ctc_synthetic02" }),
+      ),
+    ).toEqual(ok);
+  });
+
+  it("refuses a replayed exec call id, even under a fresh exec", async () => {
+    const { home, rollout } = cmHome();
+    const check = codexAttestor({ home, ...fakeProcs() });
+    expect(check.attestNow(codeHello())).toEqual(ok);
+    appendFileSync(rollout, exec("ctc_synthetic02", "call_exec2"));
+    expect(check.attestNow(codeHello({ item_id: "ctc_synthetic02" }))).toEqual(
+      no,
+    );
+  });
+
+  it("refuses an exec closed by its output, its end, or its turn's end", async () => {
+    for (const close of [
+      execOutput("call_exec1"),
+      line("event_msg", {
+        type: "custom_tool_call_end",
+        call_id: "call_exec1",
+      }),
+      turnEv("task_complete"),
+      turnEv("turn_aborted"),
+      line("event_msg", { type: "task_complete" }),
+    ]) {
+      const { home } = cmHome(CODE_MODE + close);
+      expect(
+        codexAttestor({ home, ...fakeProcs() }).attestNow(codeHello()),
+      ).toEqual(no);
+    }
+  });
+
+  it("refuses a call id Codex already reported done", async () => {
+    const { home } = codexHome({
+      thread: CM_THREAD,
+      rollout:
+        CODE_MODE +
+        line("event_msg", {
+          type: "item_completed",
+          turn_id: TURN,
+          item: { type: "McpToolCall", id: EXEC1, server: "openbus" },
+        }),
+    });
+    expect(
+      codexAttestor({ home, ...fakeProcs() }).attestNow(codeHello()),
+    ).toEqual(no);
+  });
+
+  it("refuses an exec of another turn, or of a turn other than the last started", async () => {
+    const OTHER = "01a18536-c0de-7000-8000-00000000beef";
+    const wrong = cmHome();
+    expect(
+      codexAttestor({ home: wrong.home, ...fakeProcs() }).attestNow(
+        codeHello({ turn_id: OTHER }),
+      ),
+    ).toEqual(no);
+    const later = codexHome({
+      thread: CM_THREAD,
+      rollout: CODE_MODE + turnEv("task_started", OTHER),
+    });
+    expect(
+      codexAttestor({ home: later.home, ...fakeProcs() }).attestNow(
+        codeHello(),
+      ),
+    ).toEqual(no);
+    // The last started turn is the latest, even once it has ended.
+    const ended = codexHome({
+      thread: CM_THREAD,
+      rollout:
+        CODE_MODE +
+        turnEv("task_started", OTHER) +
+        turnEv("task_complete", OTHER),
+    });
+    expect(
+      codexAttestor({ home: ended.home, ...fakeProcs() }).attestNow(
+        codeHello(),
+      ),
+    ).toEqual(no);
+    // No task_started in view: no latest turn, so nothing is admitted.
+    const unseen = codexHome({
+      thread: CM_THREAD,
+      rollout: CODE_MODE.split("\n")
+        .filter((l) => !l.includes('"task_started"'))
+        .join("\n"),
+    });
+    expect(
+      codexAttestor({ home: unseen.home, ...fakeProcs() }).attestNow(
+        codeHello(),
+      ),
+    ).toEqual(no);
+  });
+
+  it("refuses an exec whose script names no OpenBus tool: a shell, a wait, a dynamic lookup", async () => {
+    for (const input of [
+      'text(await tools.exec_command({ cmd: "ls" }));',
+      "await tools.wait({ agent: 'a1' });",
+      'const t = ALL_TOOLS.find((x) => x.name.endsWith("list_agents")); await tools[t.name]({});',
+    ]) {
+      const { home } = cmHome(
+        cmMeta() +
+          turnEv("task_started") +
+          exec("ctc_synthetic01", "call_exec1", TURN, undefined, { input }),
+      );
+      expect(
+        codexAttestor({ home, ...fakeProcs() }).attestNow(codeHello()),
+      ).toEqual(no);
+    }
+  });
+
+  it("refuses an exec written before P started (lstart + 1 s)", async () => {
+    const { home } = codexHome({
+      thread: CM_THREAD,
+      rollout:
+        cmMeta() +
+        turnEv("task_started") +
+        exec("ctc_old", "call_old", TURN, "2026-10-29T01:11:42.900Z"),
+    });
+    expect(
+      codexAttestor({ home, ...fakeProcs() }).attestNow(
+        codeHello({ item_id: "ctc_old" }),
+      ),
+    ).toEqual(no);
+  });
+
+  it("refuses a missing item id or turn, an odd call id, or a non-exec item", async () => {
+    const { home } = codexHome({
+      thread: CM_THREAD,
+      rollout:
+        CODE_MODE +
+        exec("ctc_named", "call_n", TURN, undefined, { name: "other" }) +
+        exec("ctc_ns", "call_ns", TURN, undefined, {
+          namespace: "mcp__openbus",
+        }),
+    });
+    const check = codexAttestor({ home, ...fakeProcs() });
+    for (const h of [
+      codeHello({ item_id: undefined }),
+      codeHello({ turn_id: undefined }),
+      codeHello({ call_id: "call_exec1" }),
+      codeHello({ call_id: "exec-XYZ" }),
+      codeHello({ item_id: "ctc_named" }),
+      codeHello({ item_id: "ctc_ns" }),
+      codeHello({ item_id: "ctc_nope" }),
+    ])
+      expect(check.attestNow(h)).toEqual(no);
+    // None of those spent the exec.
+    expect(check.attestNow(codeHello())).toEqual(ok);
+  });
+
+  it("keeps the function_call rule first: an item id changes nothing there", async () => {
+    const { home } = codexHome();
+    const check = codexAttestor({ home, ...fakeProcs() });
+    expect(
+      check.attestNow(codexHello({ item_id: "fc_1", turn_id: "t" })),
+    ).toEqual(ok);
+    expect(check.attestNow(codexHello({ item_id: "fc_1" }))).toEqual(no);
+  });
+
+  it("admits an exec that lands during the wait, once", async () => {
+    const { home, rollout } = codexHome({
+      thread: CM_THREAD,
+      rollout: cmMeta() + turnEv("task_started"),
+    });
+    const check = codexAttestor({
+      home,
+      ...fakeProcs(),
+      retryMs: 1,
+      sleep: async () => {
+        appendFileSync(rollout, exec("ctc_synthetic01", "call_exec1"));
+      },
+    });
+    expect(await check.attest(codeHello())).toEqual(ok);
+    expect(await check.attest(codeHello({ call_id: EXEC2 }))).toEqual(once);
+  });
+});
 
 describe("codex attestation against real processes (C26c)", () => {
   it("finds ps and lsof with the launchd service's PATH, or none (C26j)", async () => {

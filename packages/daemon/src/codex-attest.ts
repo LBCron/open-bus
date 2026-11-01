@@ -26,6 +26,9 @@ export const CODEX_REFUSALS = {
   callNotFound:
     "this call is not an open OpenBus call in the thread. Call the tool again.",
   subagent: "only the main Codex thread can use OpenBus, not a subagent.",
+  /** DRAFT (C27), pending Design. */
+  oneExec:
+    "this exec already made an OpenBus call. Make each OpenBus call in its own exec.",
 } as const;
 
 /**
@@ -94,19 +97,48 @@ type Proof = { cwd: string; rollout: string };
 
 type OpenCall = { at: number; turn: string | undefined };
 
-/** Admitted call ids kept per thread, oldest dropped first. */
-const USED_CAP = 4096;
+/** A code-mode `exec` custom_tool_call with no output yet (C27). */
+type OpenExec = OpenCall & { call: string };
 
-/** A thread's rollout, read forward from `offset`: only appended bytes are new. */
-type Scan = {
-  rollout: string;
-  /** -1 until the first read, which starts TAIL_CAP from the end. */
-  offset: number;
+/** The call id Codex mints for each call an `exec` makes (codex-rs delegate.rs). */
+const EXEC_CALL = /^exec-[0-9a-f-]{36}$/;
+
+/** What `visitLine` keeps from a rollout. */
+type Seen = {
   /**
    * mcp__openbus calls with no output yet: each line's timestamp (ms) and its
    * turn. The end of that turn closes it.
    */
   open: Map<string, OpenCall>;
+  /**
+   * Code mode: open `exec` calls that name an OpenBus tool, by item id
+   * (`_meta.itemId`), closed the same ways.
+   */
+  execs: Map<string, OpenExec>;
+  /**
+   * The last `task_started` turn: the thread's latest. Codex 0.165 rollouts
+   * show no nested turns, so an earlier one never becomes latest again.
+   */
+  latest: string | undefined;
+  /** `exec-<uuid>` call ids Codex reported done: never admitted. */
+  done: Set<string>;
+};
+
+const seen = (): Seen => ({
+  open: new Map(),
+  execs: new Map(),
+  latest: undefined,
+  done: new Set(),
+});
+
+/** Admitted call ids kept per thread, oldest dropped first. */
+const USED_CAP = 4096;
+
+/** A thread's rollout, read forward from `offset`: only appended bytes are new. */
+type Scan = Seen & {
+  rollout: string;
+  /** -1 until the first read, which starts TAIL_CAP from the end. */
+  offset: number;
   /** The process that built the scan, for pruning when it goes. */
   pid: number;
 };
@@ -132,6 +164,11 @@ const plainFile = (path: string): boolean => {
  * thread's rollout has this call id as an unanswered `mcp__openbus`
  * function_call, and the thread is not a subagent. Stateful: one per daemon.
  *
+ * Code mode (C27, docs/probes/codex.md §2): the call id is a fresh
+ * `exec-<uuid>` the rollout never has, so the hello's item id must instead be
+ * an open `exec` custom_tool_call that names an OpenBus tool, in the thread's
+ * latest turn, which is the request's; one hello per exec.
+ *
  * The bar assumes nothing but Codex writes to CODEX_HOME (docs/probes/codex.md
  * §2): a same-user writer there can forge the rollout and the lock.
  */
@@ -152,12 +189,17 @@ export function codexAttestor(deps: CodexAttestDeps = {}): CodexAttestor {
    * pruned with a process, so a resumed thread cannot replay one.
    */
   const used = new Map<string, Set<string>>();
-  const spend = (thread: string, call: string) => {
-    const set = used.get(thread) ?? new Set<string>();
-    set.add(call);
-    if (set.size > USED_CAP) set.delete(set.values().next().value as string);
-    used.set(thread, set);
-  };
+  /** Code-mode exec item ids already admitted, kept the same way. */
+  const usedItems = new Map<string, Set<string>>();
+  const spendIn =
+    (m: Map<string, Set<string>>) => (thread: string, id: string) => {
+      const set = m.get(thread) ?? new Set<string>();
+      set.add(id);
+      if (set.size > USED_CAP) set.delete(set.values().next().value as string);
+      m.set(thread, set);
+    };
+  const spend = spendIn(used);
+  const spendItem = spendIn(usedItems);
   /** Each thread's session_meta, read once per rollout. */
   const metas = new Map<
     string,
@@ -237,7 +279,7 @@ export function codexAttestor(deps: CodexAttestDeps = {}): CodexAttestor {
       return no(CODEX_REFUSALS.callNotFound);
     let scan = scans.get(thread);
     if (scan?.rollout !== proof.rollout) {
-      scan = { rollout: proof.rollout, offset: -1, open: new Map(), pid: p };
+      scan = { rollout: proof.rollout, offset: -1, pid: p, ...seen() };
       scans.set(thread, scan);
     }
     // lstart has one-second resolution: a line stamped within P's first
@@ -246,12 +288,36 @@ export function codexAttestor(deps: CodexAttestDeps = {}): CodexAttestor {
     const since =
       ((lstartEpoch(proc.start) ?? Number.POSITIVE_INFINITY) + 1) * 1000;
     const isOpen = (sc: Scan) => (sc.open.get(cx.call_id)?.at ?? -1) >= since;
+    // Code mode: the exec is open in this turn, the thread's latest, and was
+    // written by P; the call id is Codex-shaped and not reported done.
+    const item = cx.item_id;
+    const execOpen = (sc: Scan) => {
+      if (!item || !cx.turn_id || !EXEC_CALL.test(cx.call_id)) return false;
+      const e = sc.execs.get(item);
+      return (
+        e !== undefined &&
+        e.at >= since &&
+        e.turn === cx.turn_id &&
+        sc.latest === e.turn &&
+        !sc.done.has(cx.call_id)
+      );
+    };
+    const itemUsed = () =>
+      item !== undefined && (usedItems.get(thread)?.has(item) ?? false);
     const ok: CodexAttest = { ok: true, cwd: proof.cwd, pid: p };
+    const admitExec = (): CodexAttest => {
+      spend(thread, cx.call_id);
+      spendItem(thread, item as string);
+      return ok;
+    };
     advance(scan);
     if (isOpen(scan)) {
       spend(thread, cx.call_id);
       return ok;
     }
+    // One hello per exec: a second OpenBus call in it is told to use its own.
+    if (itemUsed()) return no(CODEX_REFUSALS.oneExec);
+    if (execOpen(scan)) return admitExec();
     if (!retry || retryMs <= 0) return no(CODEX_REFUSALS.callNotFound);
     // The live capture saw the call flushed before the MCP request; one short
     // wait covers a slower disk. Spent now: each call id gets one wait.
@@ -259,7 +325,9 @@ export function codexAttestor(deps: CodexAttestDeps = {}): CodexAttestor {
     const sc = scan;
     return sleep(retryMs).then(() => {
       advance(sc);
-      return isOpen(sc) ? ok : no(CODEX_REFUSALS.callNotFound);
+      if (isOpen(sc)) return ok;
+      if (itemUsed()) return no(CODEX_REFUSALS.oneExec);
+      return execOpen(sc) ? admitExec() : no(CODEX_REFUSALS.callNotFound);
     });
   };
 
@@ -314,7 +382,7 @@ function advance(scan: Scan): void {
     // Replaced or truncated: start over.
     if (scan.offset > size) {
       scan.offset = -1;
-      scan.open.clear();
+      Object.assign(scan, seen());
     }
     let skipFirst = false;
     if (scan.offset < 0) {
@@ -323,7 +391,7 @@ function advance(scan: Scan): void {
       skipFirst = scan.offset > 0;
     }
     scan.offset = readLines(fd, scan.offset, size, skipFirst, (l) => {
-      visitLine(scan.open, l);
+      visitLine(scan, l);
       return false;
     });
   } finally {
@@ -397,10 +465,14 @@ const TURN_ENDS: ReadonlySet<string> = new Set([
  * Codex writes for it (docs/probes/codex.md §2, live capture) closes it. The
  * end of its turn (`turn_id`, as the capture ties a call to its turn) closes
  * it too, so one left open by a crash or never dispatched is never a token;
- * an end naming no turn closes every call.
+ * an end naming no turn closes every call. A code-mode `exec`
+ * custom_tool_call whose script names an OpenBus tool opens and closes the
+ * same way, keyed by its item id (C27); `task_started` marks the latest turn.
  */
-function visitLine(open: Map<string, OpenCall>, text: string): void {
-  if (!/call|task_complete|turn_aborted/.test(text)) return;
+function visitLine(st: Seen, text: string): void {
+  if (!/call|task_complete|turn_aborted|task_started|item_completed/.test(text))
+    return;
+  const { open, execs } = st;
   let line: Record<string, unknown> | undefined;
   try {
     line = record(JSON.parse(text));
@@ -409,19 +481,51 @@ function visitLine(open: Map<string, OpenCall>, text: string): void {
   }
   const p = record(line?.payload);
   if (!p || typeof p.type !== "string") return;
+  if (line?.type === "event_msg" && p.type === "task_started") {
+    if (typeof p.turn_id === "string") st.latest = p.turn_id;
+    return;
+  }
   if (line?.type === "event_msg" && TURN_ENDS.has(p.type)) {
     const turn = typeof p.turn_id === "string" ? p.turn_id : undefined;
     for (const [id, c] of open)
       if (turn === undefined || c.turn === undefined || c.turn === turn)
         open.delete(id);
+    for (const [id, c] of execs)
+      if (turn === undefined || c.turn === undefined || c.turn === turn)
+        execs.delete(id);
     return;
   }
   if (p.type === "item_completed") {
     const id = record(p.item)?.id;
-    if (typeof id === "string") open.delete(id);
+    if (typeof id === "string") {
+      open.delete(id);
+      if (EXEC_CALL.test(id)) {
+        st.done.add(id);
+        if (st.done.size > USED_CAP)
+          st.done.delete(st.done.values().next().value as string);
+      }
+    }
     return;
   }
   if (typeof p.call_id !== "string") return;
+  if (line?.type === "response_item" && p.type === "custom_tool_call") {
+    const turn = record(p.internal_chat_message_metadata_passthrough)?.turn_id;
+    // Only an exec whose script names an OpenBus tool: in code mode every
+    // tool runs in an exec, and a dynamic lookup (`tools[name]`) is refused.
+    if (
+      p.name === "exec" &&
+      p.namespace === undefined &&
+      typeof p.id === "string" &&
+      typeof p.input === "string" &&
+      p.input.includes(`${OPENBUS_NAMESPACE}__`)
+    )
+      execs.set(p.id, {
+        call: p.call_id,
+        at: Date.parse(String(line.timestamp)),
+        turn: typeof turn === "string" ? turn : undefined,
+      });
+    return;
+  }
   if (line?.type === "response_item" && p.type === "function_call") {
     const ours =
       p.namespace === OPENBUS_NAMESPACE ||
@@ -437,13 +541,15 @@ function visitLine(open: Map<string, OpenCall>, text: string): void {
       });
     return;
   }
-  if (p.type.endsWith("_output") || p.type.endsWith("_end"))
+  if (p.type.endsWith("_output") || p.type.endsWith("_end")) {
     open.delete(p.call_id);
+    for (const [id, e] of execs) if (e.call === p.call_id) execs.delete(id);
+  }
 }
 
 /** Whether `callId` is an unanswered openbus call in the rollout's tail. */
 export function callOpen(path: string, callId: string): boolean {
-  const scan: Scan = { rollout: path, offset: -1, open: new Map(), pid: 0 };
+  const scan: Scan = { rollout: path, offset: -1, pid: 0, ...seen() };
   advance(scan);
   return scan.open.has(callId);
 }

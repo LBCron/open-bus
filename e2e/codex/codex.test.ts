@@ -39,7 +39,12 @@ import {
   fakeAnthropic,
   type SeenMessage,
 } from "./fake-anthropic.ts";
-import { type FakeModel, fakeModel, toolsPrompt } from "./fake-model.ts";
+import {
+  codePrompt,
+  type FakeModel,
+  fakeModel,
+  toolsPrompt,
+} from "./fake-model.ts";
 import {
   jwks,
   linkApp,
@@ -312,6 +317,58 @@ describe("codex exec", () => {
       existsSync(join(homes.obHome, "codex-queued.json")),
       "codex-queued.json: a codex queue ran",
     ).toBe(false);
+  });
+});
+
+describe("codex exec in code mode (C27)", () => {
+  it("each exec's OpenBus call is attested by its item; a second in one exec is told to use its own", async () => {
+    const ws = codexWorkspace("cx-code");
+    const p = await joinPeer("code", "peer", ws);
+    const run = start(
+      "codex-code",
+      codexBin,
+      [
+        "exec",
+        "-c",
+        "features.code_mode_only=true",
+        codePrompt([
+          [["list_agents", {}]],
+          [["send_message", { to: "peer", text: "hello from code mode" }]],
+          [
+            ["self", {}],
+            ["self", {}],
+          ],
+        ]),
+      ],
+      { cwd: ws, env },
+    );
+    const ready = pastFirstSecond(run.pid as number);
+    ready.catch(() => {});
+    model.hold = async () => {
+      await ready;
+    };
+    expect(await exited(run)).toBe(0);
+    const turn = model.seen.filter((s) => s.user.startsWith("ob-e2e code"));
+    const thread = turn[0]?.thread ?? "";
+    expect(thread).not.toBe("");
+    const outs = onThread(thread)
+      .filter((s) => s.answers === "exec")
+      .map((s) => s.output ?? "");
+    expect(outs).toHaveLength(3);
+    expect(outs[0]).toMatch(/- peer \(pi, cx-code,/);
+    expect(outs[1]).toMatch(/Delivered to peer/);
+    expect(p.delivered).toEqual([
+      expect.objectContaining({
+        from_name: "codex",
+        namespace: "cx-code",
+        body: "hello from code mode",
+      }),
+    ]);
+    // The exec's first call is admitted; its second is refused, retryably.
+    expect(outs[2]).toContain(
+      "this exec already made an OpenBus call. Make each OpenBus call in its own exec.",
+    );
+    expect(outs[2].match(/did not accept/g)).toHaveLength(1);
   });
 });
 

@@ -4525,3 +4525,44 @@ Order: AC5a, then AC5b, then AC5c, then AC5d. One PR each. AC5a starts when AC1 
 3. **The Pi integration is an extension tool, not MCP**, because the installed `@earendil-works/pi-coding-agent` exposes `registerTool` and `sendMessage` and no `registerMcpServer`. If Pi adds MCP registration, the same four tool functions can be registered there; the daemon is unchanged.
 4. **OpenCode needs `opencode service restart` after install.** The adapter cannot do it for a running service, and without it the shared MCP server keeps the old config. The install step runs it; a failure is surfaced, not swallowed.
 5. **`isolatePeerMachines: true` breaks injection.** The spec assumes it is off. `open-bus doctor` prints a `miss` line when `~/.claude/settings.json` sets it, because the frame would be held for approval that the daemon cannot give; this is a user-facing note, not an error we can fix locally.
+
+## Task C27: Codex code mode attestation (#343)
+
+The Codex desktop app (bundled codex-cli 0.166 alpha) calls MCP tools through
+code mode: the model emits a `custom_tool_call` named `exec` whose JS calls
+`tools.mcp__openbus__<tool>(…)`. The attestation (C26c) accepts only an open
+`mcp__openbus` `function_call`, so every call is refused. Code mode is chosen
+per model (`tool_mode: code_mode_only` for newer models, since ~0.145), so the
+CLI and TUI hit it too; CI missed it (fake model). Probe:
+`.superpowers/sdd/05-client/c27-probe-report.md`.
+
+Binding: in code mode `_meta.callId` is a fresh `exec-<uuid>` that is never in
+the rollout at request time; `_meta.itemId` is the outer `custom_tool_call`'s
+`payload.id`, which is.
+
+- **C27a adapter:** pass `item_id` (`_meta.itemId`) in the codex hello when
+  present. IPC field optional; old daemons ignore it.
+- **C27b daemon:** keep the `function_call` rule. When it doesn't match, accept
+  only if every check holds:
+  1. the rollout has a `response_item` `custom_tool_call` with
+     `payload.id == item_id`, `name == "exec"` and no namespace;
+  2. its turn is the request's turn and the thread's latest;
+  3. no `custom_tool_call_output` exists for its `call_id`, and the turn hasn't
+     ended;
+  4. its timestamp is at or after P's start + 1 s;
+  5. `call_id` matches `^exec-[0-9a-f-]{36}$`, and neither it nor `item_id` has
+     been used before (one hello per exec, the same as one per `function_call`).
+
+  `input` naming `mcp__openbus__` narrows, but isn't the boundary. A missing
+  `item_id` is refused.
+- **C27c fixtures and e2e:** add a synthetic code-mode rollout fixture covering
+  accept, second call in the same exec, closed exec, wrong turn, before P, a
+  reused item, and a missing itemId. If the CI Codex can be forced into code
+  mode with the fake model, add a code-mode case to `pnpm e2e:codex`.
+- **C27d docs:** update `docs/probes/codex.md` with the code-mode identity and
+  its residuals.
+
+Ruling: one hello per exec. A second OpenBus call inside the same `exec` is
+refused, and the refusal tells the agent to make each OpenBus call in its own
+`exec`. Why: it keeps today's strength, a single use per model-written item.
+If that's wrong, agents that batch calls see a retryable refusal.

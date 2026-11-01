@@ -36,6 +36,13 @@ export type CodexCall = {
   threadSource?: string;
   /** A hint only: the daemon takes the cwd from the rollout. */
   cwd?: string;
+  /**
+   * Code mode (C27): the outer `exec` call's item id, which the daemon finds
+   * in the rollout; the call id there is a fresh `exec-<uuid>` it never has.
+   */
+  itemId?: string;
+  /** The turn the call was made in. */
+  turnId?: string;
 };
 
 const str = (v: unknown): string | undefined =>
@@ -85,11 +92,15 @@ export function codexCall(meta: unknown): CodexCall | { refuse: string } {
   if (source && SPAWNED_SOURCES.has(source))
     return { refuse: SUBAGENT_REFUSAL };
   const cwd = cwdOf(t);
+  const itemId = str(m.itemId);
+  const turnId = str(t.turn_id);
   return {
     threadId,
     callId,
     ...(source ? { threadSource: source } : {}),
     ...(cwd ? { cwd } : {}),
+    ...(itemId ? { itemId } : {}),
+    ...(turnId ? { turnId } : {}),
   };
 }
 
@@ -117,6 +128,8 @@ export function codexHello(
       call_id: call.callId,
       ppid,
       ...(call.threadSource ? { thread_source: call.threadSource } : {}),
+      ...(call.itemId ? { item_id: call.itemId } : {}),
+      ...(call.turnId ? { turn_id: call.turnId } : {}),
     },
   });
   return hello.success ? hello.data : undefined;

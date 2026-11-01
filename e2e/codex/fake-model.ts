@@ -5,7 +5,10 @@
 // (a prompt, or the body of a woken turn's message) calls openbus
 // `list_agents`, then `send_message` to <to>, then answers with the tool's
 // output as text. A line `ob-e2e tools <json>` (an array of [tool, args])
-// calls each openbus tool in turn, then answers. Any other user message gets
+// calls each openbus tool in turn, then answers. A line `ob-e2e code <json>`
+// (an array of execs, each an array of [tool, args]) does the same through
+// code mode (C27): one `exec` custom_tool_call per entry, whose script calls
+// its tools in order. Any other user message gets
 // a one-line text answer. Every request is recorded with the
 // thread Codex names in its `thread-id` header, so the test asserts on what
 // the model actually saw.
@@ -18,7 +21,25 @@ export const TOOLS = /^ob-e2e tools (.+)$/m;
 /** The line that makes the model call `calls` in order, then answer. */
 export const toolsPrompt = (calls: [string, object][]): string =>
   `ob-e2e tools ${JSON.stringify(calls)}`;
+/** The prompt that runs openbus tools in code mode: `ob-e2e code [[["self", {}]]]`. */
+export const CODE = /^ob-e2e code (.+)$/m;
+export const codePrompt = (execs: [string, object][][]): string =>
+  `ob-e2e code ${JSON.stringify(execs)}`;
+
 const NAMESPACE = "mcp__openbus";
+
+/**
+ * An exec's script: each tool called by its literal `tools.mcp__openbus__<tool>`
+ * name (the daemon admits only an exec that names one), each result or error
+ * printed as one line.
+ */
+const script = (calls: [string, object][]): string =>
+  calls
+    .map(
+      ([tool, args]) =>
+        `try { text(JSON.stringify(await tools.${NAMESPACE}__${tool}(${JSON.stringify(args)}))); } catch (e) { text("error: " + String(e)); }`,
+    )
+    .join("\n");
 
 type Item = {
   type: string;
@@ -27,6 +48,7 @@ type Item = {
   namespace?: string;
   call_id?: string;
   arguments?: string;
+  input?: string;
   content?: unknown;
   output?: unknown;
 };
@@ -38,9 +60,9 @@ export type Seen = {
   user: string;
   /** The last item: what this request answers. */
   last: Item;
-  /** The text of a function_call_output, when `last` is one. */
+  /** The text of a function_call_output (or custom_tool_call_output), when `last` is one. */
   output?: string;
-  /** The tool call `last` answers, when it is a function_call_output. */
+  /** The tool call `last` answers, when it is such an output: `exec` in code mode. */
   answers?: string;
 };
 
@@ -82,14 +104,16 @@ export async function fakeModel(): Promise<FakeModel> {
       (i) => i.type === "message" && i.role === "user",
     );
     const user = textOf(users[users.length - 1]?.content);
-    const call =
-      last.type === "function_call_output"
-        ? input.find(
-            (i) => i.type === "function_call" && i.call_id === last.call_id,
-          )
+    const answered = (t: string) =>
+      last.type === `${t}_output`
+        ? input.find((i) => i.type === t && i.call_id === last.call_id)
         : undefined;
+    const call = answered("function_call") ?? answered("custom_tool_call");
     const output =
-      last.type === "function_call_output" ? textOf(last.output) : undefined;
+      last.type === "function_call_output" ||
+      last.type === "custom_tool_call_output"
+        ? textOf(last.output)
+        : undefined;
     seen.push({
       thread: String(req.headers["thread-id"] ?? ""),
       user,
@@ -113,22 +137,38 @@ export async function fakeModel(): Promise<FakeModel> {
       id: `msg_${id}`,
       content: [{ type: "output_text", text }],
     });
-    const script = SCRIPT.exec(user);
+    const exec = (calls: [string, object][]): object => ({
+      type: "custom_tool_call",
+      id: `ctc_${id}`,
+      call_id: `call_${id}`,
+      name: "exec",
+      input: script(calls),
+    });
+    const send = SCRIPT.exec(user);
     const calls = TOOLS.exec(user);
+    const code = CODE.exec(user);
     // This turn's tool outputs so far: those after its user message.
     const turn = input.slice(input.lastIndexOf(users[users.length - 1]));
     const done = turn.filter((i) => i.type === "function_call_output").length;
+    const ran = turn.filter((i) => i.type === "custom_tool_call_output").length;
     const todo = calls
       ? (JSON.parse(calls[1]) as [string, object][])[done]
       : undefined;
+    const execTodo = code
+      ? (JSON.parse(code[1]) as [string, object][][])[ran]
+      : undefined;
     let item: object;
-    if (todo) item = tool(todo[0], todo[1]);
-    else if (script && last.type === "message") item = tool("list_agents", {});
-    else if (script && call?.name === "list_agents")
-      item = tool("send_message", { to: script[1], text: script[2] });
+    if (execTodo) item = exec(execTodo);
+    else if (todo) item = tool(todo[0], todo[1]);
+    else if (send && last.type === "message") item = tool("list_agents", {});
+    else if (send && call?.name === "list_agents")
+      item = tool("send_message", { to: send[1], text: send[2] });
     else if (call) item = say(`done: ${output}`);
     else item = say(`seen: ${user.slice(0, 80)}`);
-    if ((item as Item).type === "function_call")
+    if (
+      (item as Item).type === "function_call" ||
+      (item as Item).type === "custom_tool_call"
+    )
       await model.hold?.(String((item as Item).name));
 
     res.writeHead(200, { "content-type": "text/event-stream" });

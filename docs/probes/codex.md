@@ -189,6 +189,66 @@ the user's trust in that thread. The other harnesses have the same same-user
 limit: the daemon has no peer credentials, so `hello.pid` is a claim, which
 is why a codex connection is bound to its one call.
 
+**Code mode (C27, #343), 2026-11-01.** Codex chooses code mode per model
+(`tool_mode: "code_mode_only"` in the model catalog, on by ~0.145 for newer
+models; or `[features] code_mode_only`), so the CLI and TUI use it too, not
+only the desktop app. The model then emits a `custom_tool_call` named `exec`
+whose JavaScript calls `tools.<name>(…)`, and every OpenBus call is a nested
+`tools/call`. Source: openai/codex `rust-v0.166.0-alpha.5.1`
+(`.superpowers/sdd/05-client/c27-probe-report.md`).
+
+- `_meta.callId` is a fresh `exec-<uuid>` per nested call. The rollout never
+  has it at request time; Codex writes it only afterwards, as the
+  `item_completed` `McpToolCall` item id.
+- `_meta.itemId` is the outer `exec` line's `payload.id` (`ctc_…`), written
+  to the rollout before dispatch, as a `function_call` is. It is the binding.
+- One exec can make many calls, and they share one `itemId`.
+
+The adapter sends `item_id` (`_meta.itemId`) and `turn_id` (the turn
+metadata's) in the hello. When no open `function_call` matches `call_id`, the
+daemon accepts only if all of the following hold (steps 1, 2 and 4 above are
+unchanged):
+
+1. The rollout has a `response_item` `custom_tool_call` with `payload.id ==
+   item_id`, `name == "exec"`, no `namespace`, and an `input` containing the
+   literal `mcp__openbus__`: the exec names an OpenBus tool.
+2. Its turn (`internal_chat_message_metadata_passthrough.turn_id`) is the
+   hello's `turn_id` and the thread's latest: the last `task_started` turn.
+   This assumes turns don't nest; none do in 0.165 rollouts. If they did, a
+   call in an outer turn after a nested one started would be refused.
+3. It is open: no `*_output` or `*_end` for its `call_id`, and its turn has
+   not ended.
+4. Its timestamp is at or after P's start + 1 s.
+5. `call_id` matches `^exec-[0-9a-f-]{36}$`, has not been used, and Codex has
+   not reported it done (`item_completed`); `item_id` has not been used.
+
+So a code-mode token is an open exec in this turn that names an OpenBus tool.
+In code mode every tool (shell, file edits, `wait`) runs inside an exec, so
+without the `input` check nearly any open exec would be a token. One hello
+per exec: a second OpenBus call in the same exec is refused with "this exec
+already made an OpenBus call. Make each OpenBus call in its own exec." This
+keeps one use per model-written item, as with a `function_call`.
+
+**Residuals (code mode):**
+
+- Refused, by design (fail closed): a second OpenBus call in one exec; a call
+  after the exec yielded (`yield_control()`, the yield timeout) or after
+  `notify()` wrote an output for it, since the exec then reads as closed; a
+  call resumed by `wait` in a later turn; a turn whose `task_started` is more
+  than 8 MB back in the rollout (no latest turn is known).
+- An exec that reaches OpenBus by a dynamic name (`tools[name]`, an
+  `ALL_TOOLS` lookup) never spells `mcp__openbus__`, so it is refused with
+  the "not an open OpenBus call" copy.
+- A same-user process can race an open exec that names an OpenBus tool: it
+  reads `item_id` and `turn_id` from the rollout, mints its own
+  `exec-<uuid>`, and is admitted. The real call then gets the one-per-exec
+  refusal, so the race shows. This is the same class as racing an in-flight
+  `function_call`.
+- Single use is per daemon lifetime, as for `call_id` today.
+- The e2e (`pnpm e2e:codex`, "codex exec in code mode") switches 0.165 into
+  code mode with `-c features.code_mode_only=true`; the fake model emits the
+  `exec` calls.
+
 ## 3. Wake
 
 **`codex queue --thread <id> --message <text>` wakes an idle thread.** It

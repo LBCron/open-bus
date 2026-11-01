@@ -105,6 +105,14 @@ export const Hello = z.object({
        * thread started without threadSource, C26j).
        */
       thread_source: z.string().min(1).max(64).optional(),
+      /**
+       * Code mode (C27): `_meta.itemId`, the outer `exec` custom_tool_call's
+       * item id, which the rollout has when the call is made; `call_id` is
+       * then a fresh `exec-<uuid>` that it never has. Older daemons strip it.
+       */
+      item_id: z.string().min(1).max(256).optional(),
+      /** The turn metadata's `turn_id`: a code-mode call must be in it. */
+      turn_id: z.string().min(1).max(256).optional(),
     })
     .optional(),
 });
