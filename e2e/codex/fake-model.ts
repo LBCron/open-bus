@@ -25,17 +25,19 @@ export const toolsPrompt = (calls: [string, object][]): string =>
 export const CODE = /^ob-e2e code (.+)$/m;
 export const codePrompt = (execs: [string, object][][]): string =>
   `ob-e2e code ${JSON.stringify(execs)}`;
+
 const NAMESPACE = "mcp__openbus";
 
 /**
- * An exec's script: each tool found by name in ALL_TOOLS (code mode names
- * nested tools itself), each result or error printed as one line.
+ * An exec's script: each tool called by its literal `tools.mcp__openbus__<tool>`
+ * name (the daemon admits only an exec that names one), each result or error
+ * printed as one line.
  */
 const script = (calls: [string, object][]): string =>
   calls
     .map(
       ([tool, args]) =>
-        `try { const t = ALL_TOOLS.find((x) => x.name.includes("openbus") && x.name.endsWith(${JSON.stringify(tool)})); text(JSON.stringify(await tools[t.name](${JSON.stringify(args)}))); } catch (e) { text("error: " + String(e)); }`,
+        `try { text(JSON.stringify(await tools.${NAMESPACE}__${tool}(${JSON.stringify(args)}))); } catch (e) { text("error: " + String(e)); }`,
     )
     .join("\n");
 

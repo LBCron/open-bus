@@ -110,10 +110,16 @@ type Seen = {
    * turn. The end of that turn closes it.
    */
   open: Map<string, OpenCall>;
-  /** Code mode: open `exec` calls by item id (`_meta.itemId`), closed the same ways. */
+  /**
+   * Code mode: open `exec` calls that name an OpenBus tool, by item id
+   * (`_meta.itemId`), closed the same ways.
+   */
   execs: Map<string, OpenExec>;
-  /** Started turns not yet ended, oldest first: the last is the thread's latest. */
-  turns: string[];
+  /**
+   * The last `task_started` turn: the thread's latest. Codex 0.165 rollouts
+   * show no nested turns, so an earlier one never becomes latest again.
+   */
+  latest: string | undefined;
   /** `exec-<uuid>` call ids Codex reported done: never admitted. */
   done: Set<string>;
 };
@@ -121,7 +127,7 @@ type Seen = {
 const seen = (): Seen => ({
   open: new Map(),
   execs: new Map(),
-  turns: [],
+  latest: undefined,
   done: new Set(),
 });
 
@@ -160,8 +166,8 @@ const plainFile = (path: string): boolean => {
  *
  * Code mode (C27, docs/probes/codex.md §2): the call id is a fresh
  * `exec-<uuid>` the rollout never has, so the hello's item id must instead be
- * an open `exec` custom_tool_call of the thread's latest turn, which is the
- * request's; one hello per exec.
+ * an open `exec` custom_tool_call that names an OpenBus tool, in the thread's
+ * latest turn, which is the request's; one hello per exec.
  *
  * The bar assumes nothing but Codex writes to CODEX_HOME (docs/probes/codex.md
  * §2): a same-user writer there can forge the rollout and the lock.
@@ -292,7 +298,7 @@ export function codexAttestor(deps: CodexAttestDeps = {}): CodexAttestor {
         e !== undefined &&
         e.at >= since &&
         e.turn === cx.turn_id &&
-        sc.turns.at(-1) === e.turn &&
+        sc.latest === e.turn &&
         !sc.done.has(cx.call_id)
       );
     };
@@ -460,8 +466,8 @@ const TURN_ENDS: ReadonlySet<string> = new Set([
  * end of its turn (`turn_id`, as the capture ties a call to its turn) closes
  * it too, so one left open by a crash or never dispatched is never a token;
  * an end naming no turn closes every call. A code-mode `exec`
- * custom_tool_call opens and closes the same way, keyed by its item id
- * (C27); `task_started` and the ends track which turn is the latest.
+ * custom_tool_call whose script names an OpenBus tool opens and closes the
+ * same way, keyed by its item id (C27); `task_started` marks the latest turn.
  */
 function visitLine(st: Seen, text: string): void {
   if (!/call|task_complete|turn_aborted|task_started|item_completed/.test(text))
@@ -476,8 +482,7 @@ function visitLine(st: Seen, text: string): void {
   const p = record(line?.payload);
   if (!p || typeof p.type !== "string") return;
   if (line?.type === "event_msg" && p.type === "task_started") {
-    if (typeof p.turn_id === "string" && !st.turns.includes(p.turn_id))
-      st.turns.push(p.turn_id);
+    if (typeof p.turn_id === "string") st.latest = p.turn_id;
     return;
   }
   if (line?.type === "event_msg" && TURN_ENDS.has(p.type)) {
@@ -488,7 +493,6 @@ function visitLine(st: Seen, text: string): void {
     for (const [id, c] of execs)
       if (turn === undefined || c.turn === undefined || c.turn === turn)
         execs.delete(id);
-    st.turns = turn === undefined ? [] : st.turns.filter((t) => t !== turn);
     return;
   }
   if (p.type === "item_completed") {
@@ -506,10 +510,14 @@ function visitLine(st: Seen, text: string): void {
   if (typeof p.call_id !== "string") return;
   if (line?.type === "response_item" && p.type === "custom_tool_call") {
     const turn = record(p.internal_chat_message_metadata_passthrough)?.turn_id;
+    // Only an exec whose script names an OpenBus tool: in code mode every
+    // tool runs in an exec, and a dynamic lookup (`tools[name]`) is refused.
     if (
       p.name === "exec" &&
       p.namespace === undefined &&
-      typeof p.id === "string"
+      typeof p.id === "string" &&
+      typeof p.input === "string" &&
+      p.input.includes(`${OPENBUS_NAMESPACE}__`)
     )
       execs.set(p.id, {
         call: p.call_id,
