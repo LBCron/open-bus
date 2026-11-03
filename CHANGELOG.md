@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.63.0](https://github.com/open-artifacts-ai/open-bus/compare/v0.62.0...v0.63.0) (2026-11-03)
+
+
+### Features
+
+* **dashboard:** AC6 markup from Design's screens ([#355](https://github.com/open-artifacts-ai/open-bus/issues/355)) ([#410](https://github.com/open-artifacts-ai/open-bus/issues/410)) ([83a7ab9](https://github.com/open-artifacts-ai/open-bus/commit/83a7ab9289f32b53983985749bc19ef5b1e430d5))
+* **server:** /link confirm page to Design's 4A screen ([#355](https://github.com/open-artifacts-ai/open-bus/issues/355)) ([#408](https://github.com/open-artifacts-ai/open-bus/issues/408)) ([add3c21](https://github.com/open-artifacts-ai/open-bus/commit/add3c21d27906da9231394cd1e5c533731356cca))
+
 ## [0.62.0](https://github.com/open-artifacts-ai/open-bus/compare/v0.61.2...v0.62.0) (2026-11-03)
 
 
