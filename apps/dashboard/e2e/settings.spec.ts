@@ -16,7 +16,7 @@ test("unlink an app with confirm, then the empty state", async ({ page }) => {
     page.getByText("Link one from the app's settings.", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText("https://oa.example", { exact: true }),
+    page.getByRole("button", { name: "Unlink https://oa.example" }),
   ).toHaveCount(0);
 });
 
