@@ -717,7 +717,7 @@ describe("design/screens/settings.html (D16)", () => {
     );
     expect(settings).toContain(">Cancel</button>");
     expect(settings).toMatch(
-      /Unlinked <bdi data-toast-host class="font-mono">artifacts\.leourbina\.com<\/bdi>\./,
+      /Unlinked <bdi data-toast-host class="font-mono">https:\/\/artifacts\.leourbina\.com<\/bdi>\./,
     );
   });
 
