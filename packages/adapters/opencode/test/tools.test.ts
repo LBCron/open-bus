@@ -293,7 +293,7 @@ describe("set_status and card in OpenCode (AC5b)", () => {
   });
 });
 
-describe("roles and status in OpenCode (AC5c)", () => {
+describe("status in OpenCode (AC5c)", () => {
   const at = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
   const row = (r: Record<string, unknown>) => ({
     name: "code-96",
@@ -326,40 +326,39 @@ describe("roles and status in OpenCode (AC5c)", () => {
     }).then((r) => ({ text: r.content[0]?.text, frames, r }));
   };
 
-  it("list_agents: role holder, statuses, stale, hostile; nothing new below the gate", async () => {
+  it("list_agents: statuses, stale, hostile; nothing new below the gate", async () => {
     const { text } = await run("list_agents", {}, () => ({
       type: "roster",
       agents: [
         row({
-          role: "lane-6",
           status: "working",
           status_label: "writing tests",
           status_at: at(1),
         }),
         row({ name: "b", status: "idle" }),
         row({ name: "c", status: "blocked", status_at: at(180) }),
-        row({ name: "d", role: "x‮\x1b[2J", status_label: "\x1b]0;t\x07" }),
+        row({ name: "d", status_label: "\x1b]0;t\x07" }),
         row({ name: "e" }),
       ],
     }));
     expect(text).toBe(
       [
-        '- lane-6 → code-96 (opencode, ns)  agent says: working · "writing tests"',
+        '- code-96 (opencode, ns)  agent says: working · "writing tests"',
         "- b (opencode, ns)  agent says: idle",
         "- c (opencode, ns)  agent says: blocked · 3 h ago",
-        "- x → d (opencode, ns)",
+        "- d (opencode, ns)",
         "- e (opencode, ns)",
       ].join("\n"),
     );
   });
 
-  it("self names the role; a receipt names the holder; role_vacant has its copy", async () => {
+  it("self and a receipt show nothing of an old hub's role or to_name", async () => {
     const self = await run("self", {}, () => ({
       type: "agent",
       agent: row({ role: "lane-6" }),
     }));
     expect(self.frames[0]).toMatchObject({ type: "self", card: true });
-    expect(self.text).toMatch(/You hold the role lane-6: /);
+    expect(self.text).not.toMatch(/role|lane-6/);
     const sent = await run(
       "send_message",
       { to: "lane-6", text: "hi" },
@@ -370,18 +369,6 @@ describe("roles and status in OpenCode (AC5c)", () => {
         to_name: "code-96",
       }),
     );
-    expect(sent.text).toBe("✓  Delivered to code-96 (lane-6).");
-    const vacant = await run(
-      "send_message",
-      { to: "lane-6", text: "hi" },
-      () => ({
-        type: "receipt",
-        msg_id: "m",
-        state: "refused",
-        reason: "role_vacant",
-      }),
-    );
-    expect(vacant.r.isError).toBe(true);
-    expect(vacant.text).toContain("No one holds lane-6 right now.");
+    expect(sent.text).toBe("✓  Delivered to lane-6.");
   });
 });

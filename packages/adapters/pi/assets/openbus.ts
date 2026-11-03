@@ -133,11 +133,6 @@ const refusals: Record<
       `That name exists in ${n && n > 1 ? `${n} namespaces` : "more than one namespace"}.`,
     "Send again with to_namespace set to one of them.",
   ],
-  // A send to a role no one holds; `to` is the role.
-  role_vacant: [
-    (_n, to) => `No one holds ${to ?? "that role"} right now.`,
-    "Ask the user to point it at an agent, or message an agent by name.",
-  ],
 };
 
 /**
@@ -157,21 +152,18 @@ const quoted = (head: string, quote: string, tail: string): string => {
 /**
  * A receipt as an agent reads it: design/cli/transcript.md "Receipts",
  * verbatim, uncoloured (the glyph carries the state). `namespaces` is how many
- * namespaces hold `to`, for `ambiguous`. A `to_name` (a send to a role) shows
- * as "code-96 (lane-6)". `excerpt` (from `excerptOf`) is the
+ * namespaces hold `to`, for `ambiguous`. `excerpt` (from `excerptOf`) is the
  * message an expired or refused notice is about; without it the quote is left
  * out.
  */
 function receiptText(
-  r: { state: string; reason?: string; to_name?: string },
+  r: { state: string; reason?: string },
   sentTo: string,
   namespaces?: number,
   excerpt?: string,
 ): string {
   const quote = excerpt ? `"${excerpt}"` : undefined;
-  // A send to a role names its holder, then the role (AC5c).
-  const holder = r.to_name === undefined ? undefined : displayName(r.to_name);
-  const to = holder && holder !== sentTo ? `${holder} (${sentTo})` : sentTo;
+  const to = sentTo;
   switch (r.state) {
     case "pending":
       return fitLine(
@@ -357,17 +349,6 @@ const cleanStatusLabel = (raw: string): string =>
 const statusLabelTooLong = (n: number): string =>
   `openbus: that label is ${n} characters, and the limit is 64. Your status did not change. Send a shorter one.`;
 
-/** @ob/ipc displayName: a hub-supplied name, like a kind, capped at 64. */
-const displayName = (name: string): string =>
-  [
-    ...stripTerminalControls(String(name))
-      .replace(INVISIBLES, "")
-      .replace(/\s+/g, " ")
-      .trim(),
-  ]
-    .slice(0, 64)
-    .join("");
-
 /** @ob/ipc STATUS_STALE_MS. */
 const STATUS_STALE_MS = 10 * 60_000;
 
@@ -380,16 +361,9 @@ const agoText = (ms: number): string => {
 };
 
 type CardFields = {
-  role?: unknown;
   status?: unknown;
   status_label?: unknown;
   status_at?: unknown;
-};
-
-/** @ob/ipc displayRole. */
-const displayRole = (row: CardFields): string | undefined => {
-  const role = typeof row.role === "string" ? displayName(row.role) : undefined;
-  return role || undefined;
 };
 
 const displayLabel = (label: string): string =>
@@ -425,16 +399,16 @@ function rosterLine(
   },
   now = Date.now(),
 ): string {
-  const role = displayRole(a);
   const says = statusSaysText(a, now);
-  return `- ${role ? `${role} → ` : ""}${a.name} (${displayKind(a.kind)}, ${a.namespace}${typeof a.machine_label === "string" && a.machine_label ? `, ${a.machine_label}` : ""})${a.queued ? " (queued)" : ""}${says ? `  ${says}` : ""}`;
+  return `- ${a.name} (${displayKind(a.kind)}, ${a.namespace}${typeof a.machine_label === "string" && a.machine_label ? `, ${a.machine_label}` : ""})${a.queued ? " (queued)" : ""}${says ? `  ${says}` : ""}`;
 }
 
-/** @ob/ipc selfText: the agent entry, card fields cleaned, then the role in words. */
+/** @ob/ipc selfText: the agent entry, card fields cleaned. */
 function selfText(
   agent: (CardFields & Record<string, unknown>) | null,
 ): string {
   if (!agent) return JSON.stringify(agent, null, 2);
+  // A `role` from an old hub is dropped with the card fields.
   const {
     role: _r,
     status: _s,
@@ -442,14 +416,12 @@ function selfText(
     status_at: _a,
     ...rest
   } = agent;
-  const role = displayRole(agent);
   const label =
     typeof agent.status_label === "string"
       ? displayLabel(agent.status_label)
       : "";
   const shown = {
     ...rest,
-    ...(role ? { role } : {}),
     ...(typeof agent.status === "string"
       ? { status: displayKind(agent.status) }
       : {}),
@@ -459,10 +431,7 @@ function selfText(
       ? { status_at: agent.status_at }
       : {}),
   };
-  const json = JSON.stringify(shown, null, 2);
-  return role
-    ? `${json}\n\nYou hold the role ${role}: the user pointed it at you, so messages sent to ${role} reach you.`
-    : json;
+  return JSON.stringify(shown, null, 2);
 }
 
 /** @ob/shared OriginSchema: an exact https origin (http only on loopback), at most 512. */
@@ -493,7 +462,6 @@ export const copy = {
   statusSetText,
   earlierStatusText,
   displayKind,
-  displayRole,
   statusSaysText,
   rosterLine,
   selfText,
@@ -1103,7 +1071,6 @@ export default function openbus(pi: Pi): void {
       const receipt = {
         state: String(r.state),
         reason: r.reason as string,
-        ...(typeof r.to_name === "string" ? { to_name: r.to_name } : {}),
       };
       const n =
         receipt.reason === "ambiguous"

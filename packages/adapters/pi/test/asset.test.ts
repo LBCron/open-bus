@@ -974,7 +974,7 @@ describe("the asset's card copy matches the shared copy", () => {
   });
 });
 
-describe("roles and status, as Pi shows them (AC5c)", () => {
+describe("status, as Pi shows it (AC5c)", () => {
   const minsAgo = (m: number) =>
     new Date(Date.now() - m * 60_000).toISOString();
   const row = (r: Record<string, unknown>) => ({
@@ -987,14 +987,13 @@ describe("roles and status, as Pi shows them (AC5c)", () => {
     ...r,
   });
 
-  it("list_agents: a role holder, a status with and without a label, a stale one, a hostile one", async () => {
+  it("list_agents: a status with and without a label, a stale one, a hostile one", async () => {
     const { p } = await started((f) =>
       f.type === "list"
         ? {
             type: "roster",
             agents: [
               row({
-                role: "lane-6",
                 status: "working",
                 status_label: "writing tests",
                 status_at: minsAgo(1),
@@ -1003,7 +1002,6 @@ describe("roles and status, as Pi shows them (AC5c)", () => {
               row({ name: "c", status: "blocked", status_at: minsAgo(120) }),
               row({
                 name: "d",
-                role: "\x1b]52;c;aGk=\x07ln\u202e-1",
                 status: "working\x1b[2J",
                 status_label: '\x1b[31mred\u200b "x"',
               }),
@@ -1013,10 +1011,10 @@ describe("roles and status, as Pi shows them (AC5c)", () => {
     );
     expect(await p.call("list_agents", {})).toBe(
       [
-        '- lane-6 → code-96 (pi, ns)  agent says: working · "writing tests"',
+        '- code-96 (pi, ns)  agent says: working · "writing tests"',
         "- b (pi, ns)  agent says: idle",
         "- c (pi, ns)  agent says: blocked · 2 h ago",
-        "- ln-1 → d (pi, ns)  agent says: working · \"red 'x'\"",
+        "- d (pi, ns)  agent says: working · \"red 'x'\"",
       ].join("\n"),
     );
   });
@@ -1035,48 +1033,33 @@ describe("roles and status, as Pi shows them (AC5c)", () => {
     );
   });
 
-  it("self asks for its card fields and names its role; without one, the entry alone", async () => {
-    let role: unknown = "lane-6\u202e";
+  it("self asks for its card fields and shows nothing of an old hub's role", async () => {
     const { d, p } = await started((f) =>
       f.type === "self"
-        ? { type: "agent", agent: row(role ? { role } : {}) }
+        ? { type: "agent", agent: row({ role: "lane-6\u202e" }) }
         : undefined,
     );
     const out = await p.call("self", {});
     expect(
       d.conns.flatMap((c) => c.frames).find((f) => f.type === "self"),
     ).toMatchObject({ card: true });
-    expect(out).toContain('"role": "lane-6"');
-    expect(out).toMatch(/You hold the role lane-6: .* reach you\.$/);
-    role = undefined;
-    expect(await p.call("self", {})).toBe(JSON.stringify(row({}), null, 2));
+    expect(out).not.toMatch(/role|lane-6/);
   });
 
-  it("send_message: to_name names the holder; role_vacant has its copy", async () => {
-    let n = 0;
+  it("send_message: names the target, ignoring an old hub's to_name", async () => {
     const { p } = await started((f) =>
       f.type === "send"
-        ? ++n === 1
-          ? {
-              type: "receipt",
-              msg_id: ID,
-              state: "delivered",
-              to_name: "code-96",
-            }
-          : {
-              type: "receipt",
-              msg_id: ID,
-              state: "refused",
-              reason: "role_vacant",
-            }
+        ? {
+            type: "receipt",
+            msg_id: ID,
+            state: "delivered",
+            to_name: "code-96",
+          }
         : undefined,
     );
     expect(await p.call("send_message", { to: "lane-6", text: "hi" })).toBe(
-      "✓  Delivered to code-96 (lane-6).",
+      "✓  Delivered to lane-6.",
     );
-    await expect(
-      p.call("send_message", { to: "lane-6", text: "hi" }),
-    ).rejects.toThrow("No one holds lane-6 right now.");
   });
 
   const NOW = Date.parse("2026-10-29T12:00:00.000Z");
@@ -1090,7 +1073,6 @@ describe("roles and status, as Pi shows them (AC5c)", () => {
     { status: "waiting_on_owner", status_at: at(60 * 30) },
     { status: "working", status_at: "not a time" },
     {
-      role: "\x1b]0;x\x07lane\u202e-6",
       status: "zz\x9b2J",
       status_label: `a\u2066"b"\n${"y".repeat(90)}`,
     },
@@ -1102,11 +1084,10 @@ describe("roles and status, as Pi shows them (AC5c)", () => {
   });
 
   it.each([
-    [{ state: "delivered", to_name: "code-96" }, "lane-6"],
-    [{ state: "pending", to_name: "code-96" }, "lane-6"],
-    [{ state: "delivered", to_name: "x\u202e\x1b[2J" }, "lane-6"],
-    [{ state: "refused", reason: "role_vacant" }, "lane-6"],
-  ] as const)("receiptText with to_name matches @ob/ipc: %j", (r, to) => {
+    [{ state: "delivered" }, "lane-6"],
+    [{ state: "pending" }, "lane-6"],
+    [{ state: "refused", reason: "ambiguous" }, "lane-6"],
+  ] as const)("receiptText matches @ob/ipc: %j", (r, to) => {
     expect(copy.receiptText(r, to)).toBe(receiptText(r, to));
   });
 });

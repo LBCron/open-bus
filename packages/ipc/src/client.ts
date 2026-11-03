@@ -24,7 +24,7 @@ export type DaemonClient = {
     /** card: the app's exact origin and its single-use nonce. */
     aud?: string;
     nonce?: string;
-    /** self: also the agent's role and status, from its hub roster row (AC5c). */
+    /** self: also the agent's status, from its hub roster row (AC5c). */
     card?: true;
     /** A tool call: the reply carries this agent's late-delivery notices. */
     late?: true;

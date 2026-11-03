@@ -5,7 +5,7 @@ import {
   opencodeVersion,
   supportsPromptId,
 } from "@ob/adapter-opencode";
-import { displayRole, type StatusReply } from "@ob/ipc";
+import type { StatusReply } from "@ob/ipc";
 import {
   askDaemon,
   type Ctx,
@@ -263,17 +263,16 @@ export function rosterBlock(
       a.name.localeCompare(b.name),
   );
   const queued = rows.filter((r) => r.state === "queued").length;
-  // Agent card (AC5c): a role column only when a row has a role, and a row's
-  // status on the line under it. A daemon below the gate sends neither.
+  // Agent card (AC5c): a row's status on the line under it. A daemon
+  // below the gate sends none.
   const shown = rows.slice(0, ROSTER_ROWS);
-  const roles = shown.some((r) => displayRole(r) !== undefined);
   const now = ctx.now();
   return {
     lines: [
       c.rosterHeader(ns.namespace, rows.length - queued, queued),
       ...shown.flatMap((r) => {
         const says = c.rosterSays(r, now);
-        return [c.rosterRow(r, roles), ...(says ? [says] : [])];
+        return [c.rosterRow(r), ...(says ? [says] : [])];
       }),
       ...(rows.length > ROSTER_ROWS
         ? [c.rosterMore(rows.length - ROSTER_ROWS)]

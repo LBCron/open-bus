@@ -4,7 +4,6 @@ import {
   AdapterFrame,
   DaemonFrame,
   forClient,
-  receiptText,
   seesCard,
 } from "../src/index.ts";
 
@@ -82,7 +81,6 @@ const row = {
   live: true,
   state: "live" as const,
   global: false,
-  role: "lane-6",
   status: "working" as const,
   status_label: "writing tests",
   status_at: "2026-10-29T12:00:00.000Z",
@@ -93,52 +91,36 @@ const roster = {
   type: "roster" as const,
   agents: [row],
 };
-const vacant = {
-  v: 1 as const,
-  id: "r",
-  type: "receipt" as const,
-  msg_id: "m",
-  state: "refused" as const,
-  reason: "role_vacant" as const,
-  to_name: "code-96",
-};
 
 describe("forClient: the agent card gate (AC5a)", () => {
-  it("passes role, status and to_name to a client at the gate", () => {
+  it("passes status to a client at the gate", () => {
     expect(seesCard(AGENT_CARD_MIN_CLIENT)).toBe(true);
     expect(forClient(roster, AGENT_CARD_MIN_CLIENT)).toEqual(roster);
-    expect(forClient(vacant, AGENT_CARD_MIN_CLIENT)).toEqual(vacant);
   });
 
-  it("strips them below the gate, and role_vacant reads unknown_agent", () => {
+  it("strips it below the gate", () => {
     for (const marker of ["0.53.0", "0.0.0", "dev"]) {
       expect(seesCard(marker)).toBe(false);
-      const { role, status, status_label, status_at, ...plain } = row;
+      const { status, status_label, status_at, ...plain } = row;
       expect(forClient(roster, marker)).toEqual({ ...roster, agents: [plain] });
-      const { to_name, ...r } = vacant;
-      expect(forClient(vacant, marker)).toEqual({
-        ...r,
-        reason: "unknown_agent",
-      });
     }
   });
 
-  it("strips them for a marker-less 0.44.x client too, kinds rewritten", () => {
+  it("strips it for a marker-less 0.44.x client too, kinds rewritten", () => {
     const out = forClient(roster, undefined);
-    expect(out.agents[0]).not.toHaveProperty("role");
+    expect(out.agents[0]).not.toHaveProperty("status");
     expect(out.agents[0]?.kind).toBe("pi");
   });
 
-  it("keeps other refusals as they are", () => {
-    const amb = { ...vacant, reason: "ambiguous" as const };
-    expect(forClient(amb, "0.53.0")).toMatchObject({ reason: "ambiguous" });
-  });
-
-  it("role_vacant has its own copy", () => {
-    expect(
-      receiptText({ state: "refused", reason: "role_vacant" }, "lane-6"),
-    ).toBe(`×  Refused (role_vacant): your message to lane-6 was not delivered.
-   No one holds lane-6 right now.
-   Ask the user to point it at an agent, or message an agent by name.`);
+  it("a refusal passes as it is", () => {
+    const amb = {
+      v: 1 as const,
+      id: "r",
+      type: "receipt" as const,
+      msg_id: "m",
+      state: "refused" as const,
+      reason: "ambiguous" as const,
+    };
+    expect(forClient(amb, "0.53.0")).toEqual(amb);
   });
 });
