@@ -4622,12 +4622,17 @@ re-announces the harness name.
   - The daemon→adapter push `renamed {name, former?}` goes to persistent links (Pi/omp). It covers a harness or hub-side change.
 - **Gate `RENAME_MIN_CLIENT`** (the release with R393a), on the AC5a pattern:
   - The hub sends `former_names`, and a former-name `to_name`, only to daemons at or above it. Below it, the hub resolves the same, but with no `to_name`.
-  - The daemon sends `rename` only when `hello_ok.server_version` is at or above it. Against an older hub it re-sends `agent_up` with the new name: the rename still works, with no grace and no rate limit.
+  - The daemon sends `rename` only when `hello_ok.server_version` is at or above it. Against an older hub it re-sends `agent_up` with the new name: the rename still works, with no grace and no rate limit. At or above the gate the daemon **never** re-sends `agent_up` to rename. A re-sent `agent_up` there is a reopen (it clears status), not a rename.
   - The daemon passes the new fields, and sends `renamed`, only to adapters at or above it (`legacy.ts`).
   - Adapters offer the tool only when `daemon_version` is at or above it. An old daemon refuses `rename` as `bad_frame`.
   - Frozen decoders (0.44, 0.54, latest released) must still accept every frame.
 
 ### Hub rules (Backend)
+
+- **Former-name rows:** 10 renames an hour with a 1 h grace allow up to 10 live former names per agent. The roster shows the newest 5. Resolution and reservation use every live row, so trimming at 5 never frees a name early.
+- **Reservation scope:** the scope `assignName` checks today, i.e. the namespace plus the global set for global agents. A global agent's former name is reserved globally.
+- **Revoke and close** drop former names at once. Mail already queued to the agent stays, since it's keyed by agent id.
+- **`to_name` gate:** daemons at or above `RENAME_MIN_CLIENT` get the former-name `to_name`. Daemons from 0.55 up to the gate get none, since #394 removed the role case. Below 0.55, nothing changes.
 
 - **De-collision:** `assignName(proposed)` with `-2`, `-3`… as today, excluding self. A name taken includes another agent's former names still in grace (agent-bus `_used_names`). The agent's own former names are free to it (A→B→A).
 - **A former name blocks reuse for the whole grace,** by renames and new `agent_up` alike. Otherwise a sender who knew the old name reaches a stranger.
