@@ -318,8 +318,9 @@ const preTokenKinds = (ws: WebSocket): boolean =>
   !semverGte(attachmentOf(ws)?.clientVersion ?? "", KIND_TOKEN_MIN_CLIENT);
 
 /**
- * The agent card wire (roster status, receipt `to_name`) goes only to daemons at or above AGENT_CARD_MIN_CLIENT; their decoders are
- * strict. Fails closed, as preTokenKinds does.
+ * The agent card wire (roster status, receipt `to_name`) goes only to
+ * daemons at or above AGENT_CARD_MIN_CLIENT; their decoders are strict.
+ * Fails closed, as preTokenKinds does.
  */
 const gated = (ws: WebSocket): boolean =>
   semverGte(attachmentOf(ws)?.clientVersion ?? "", AGENT_CARD_MIN_CLIENT);

@@ -50,11 +50,13 @@ Origin: Blue Banjo asks M2 (role addresses) and N2 (status), and the Oct 24 iden
 The wire decoders are strict (CONTRACT.md "additive fields"), so every new server-to-daemon field is gated by `semverGte(hello.client_version, AGENT_CARD_MIN_CLIENT)`, where `AGENT_CARD_MIN_CLIENT` is the first daemon release that decodes them. Below the gate:
 
 - Roster rows carry no `status*`.
-- Receipts carry no `to_name`. From the gate on, a receipt carries `to_name`, the recipient's bus name (an optional field in `ReceiptSchema` and `receiptShape`).
+- Receipts carry no `to_name`.
 - The hub never sends `card` or `card_refused` frames.
 - The adapters don't offer the `set_status` or `card` tools. The adapter checks the daemon version from `self`.
 
-New enum values go only into `REFUSAL_REASONS` and `ErrorFrame.code`, and only from the gate on.
+From the gate on, a receipt carries `to_name`, the recipient's bus name (an optional field in `ReceiptSchema` and `receiptShape`).
+
+As a general rule, any new enum value goes only into `REFUSAL_REASONS` and `ErrorFrame.code`, and only from the gate on.
 
 ### Linking OA to a bus (one time, per OA user)
 

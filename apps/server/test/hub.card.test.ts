@@ -565,6 +565,38 @@ describe("re-checks after the signing await (AC4c)", () => {
     expect(framesSeen(d).filter((f) => f.id === fid)).toEqual([]);
     d.close();
   });
+
+  it("an agent closed and reopened mid-sign (status cleared) gets nothing", async () => {
+    let namespace = "";
+    const { d, fid, release } = await held(
+      "ses_o",
+      "Reopen",
+      async (agentId) => {
+        // Applied status, so the signed snapshot carries agent_says.
+        namespace = await inOwnerHub((s) => {
+          s.storage.sql.exec(
+            "update agents set status = 'working', status_at = ? where id = ?",
+            NOW,
+            agentId,
+          );
+          return s.storage.sql
+            .exec<{ n: string }>(
+              "select namespace as n from agents where id = ?",
+              agentId,
+            )
+            .one().n;
+        });
+      },
+    );
+    // Same id and name after the reopen; only the cleared status differs.
+    d.send({ v: 1, id: id("dn"), type: "agent_down", agent_ref: "ses_o" });
+    d.send(up(id("u"), "ses_o", "Reopen", namespace));
+    await waitFor(d, "agent_ok");
+    release();
+    await settled();
+    expect(framesSeen(d).filter((f) => f.id === fid)).toEqual([]);
+    d.close();
+  });
 });
 
 describe("card_rl housekeeping (AC4c)", () => {

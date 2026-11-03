@@ -6,8 +6,7 @@ import { AGENT_CARD_MIN_CLIENT, PONG } from "@ob/shared";
 import { describe, expect, it } from "vitest";
 import { sessionCookieName, signSession } from "../src/auth/session.js";
 import { Hub } from "../src/hub/do.js";
-import { hub } from "../src/hub/stub.js";
-import { daemon, e, inOwnerHub, machine, ns, up, waitFor } from "./helpers.js";
+import { daemon, e, machine, ns, up, waitFor } from "./helpers.js";
 
 let seq = 0;
 const id = (t: string) => `${t}${++seq}`;
@@ -65,8 +64,15 @@ describe("roles removed (#394)", () => {
   });
 
   it("a hub with the old roles table drops it on wake", async () => {
+    // A fresh hub id, so the second Hub (and its #armOnWake) touches no
+    // other test's hub.
+    const stub = e.HUB.get(
+      e.HUB.idFromName(id("roles-drop-")),
+    ) as unknown as DurableObjectStub<Hub>;
+    const inHub = <R>(fn: (s: DurableObjectState) => R) =>
+      runInDurableObject(stub, (_: Hub, s: DurableObjectState) => fn(s));
     const tables = () =>
-      inOwnerHub((s) =>
+      inHub((s) =>
         s.storage.sql
           .exec<{ name: string }>(
             "select name from sqlite_master where name in ('roles', 'roles_agent', 'roles_lrole')",
@@ -76,7 +82,7 @@ describe("roles removed (#394)", () => {
           .sort(),
       );
     // The pre-#394 schema, as hub/schema.ts created it.
-    await inOwnerHub((s) => {
+    await inHub((s) => {
       s.storage.sql.exec(`
 create table if not exists roles (
   org_id text not null,
@@ -94,12 +100,9 @@ insert into roles (org_id, namespace, role, lrole, agent_id, set_at)
     });
     expect(await tables()).toEqual(["roles", "roles_agent", "roles_lrole"]);
     // The wake: a fresh instance runs the schema and migrations.
-    await runInDurableObject(
-      hub(e) as unknown as DurableObjectStub<Hub>,
-      (_: Hub, st: DurableObjectState) => {
-        new Hub(st, e);
-      },
-    );
+    await inHub((st) => {
+      new Hub(st, e);
+    });
     expect(await tables()).toEqual([]);
   });
 });
