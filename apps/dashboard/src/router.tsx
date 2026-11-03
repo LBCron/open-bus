@@ -43,11 +43,6 @@ const routeTree = root.addChildren([
   }),
   createRoute({
     getParentRoute: () => root,
-    path: "/roles",
-    component: lazyRouteComponent(() => import("./roles/Roles"), "Roles"),
-  }),
-  createRoute({
-    getParentRoute: () => root,
     path: "/settings",
     component: lazyRouteComponent(
       () => import("./settings/Settings"),

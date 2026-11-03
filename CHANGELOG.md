@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.61.2](https://github.com/open-artifacts-ai/open-bus/compare/v0.61.1...v0.61.2) (2026-11-03)
+
+
+### Bug Fixes
+
+* **server:** let HEAD /healthz through the test card key guard ([#392](https://github.com/open-artifacts-ai/open-bus/issues/392)) ([#395](https://github.com/open-artifacts-ai/open-bus/issues/395)) ([9c27167](https://github.com/open-artifacts-ai/open-bus/commit/9c271670d146d8d04cef4984f41873d32d6622f6))
+
 ## [0.61.1](https://github.com/open-artifacts-ai/open-bus/compare/v0.61.0...v0.61.1) (2026-11-01)
 
 
