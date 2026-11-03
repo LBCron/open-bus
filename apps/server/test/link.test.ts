@@ -263,15 +263,30 @@ describe("GET /link/confirm", () => {
     const r = await confirmPage(await begin(aud));
     expect(r.status).toBe(200);
     const csp = r.headers.get("content-security-policy") ?? "";
-    expect(csp).toContain(`form-action 'self' ${aud};`);
+    expect(csp).toContain(
+      `form-action 'self' ${aud} https://${DEV.ACCESS_TEAM_DOMAIN};`,
+    );
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("default-src 'none'");
     expect(r.headers.get("cache-control")).toBe("no-store");
     expect(r.headers.get("referrer-policy")).toBe("same-origin");
     const html = await r.text();
-    expect(html).toContain(`<code>${aud}</code>`);
+    expect(html).toContain(`<bdi>${aud}</bdi>`);
+    expect(html).toContain(
+      `<form id="switch" method="post" action="${ORIGIN}/auth/logout?then=login&amp;next=${encodeURIComponent(R.linkConfirm)}"></form>`,
+    );
     expect(html).toMatch(/name="csrf" value="[^"]+"/);
     expect(html).toContain(`action="${R.linkConfirm}"`);
+  });
+
+  it("CSP falls back to 'self' plus aud when ACCESS_TEAM_DOMAIN is not a hostname", async () => {
+    const aud = newAud();
+    const e = { ...DEV, ACCESS_TEAM_DOMAIN: "x; script-src *" };
+    const r = await confirmPage(await begin(aud, e), e);
+    expect(r.status).toBe(200);
+    const csp = r.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain(`form-action 'self' ${aud};`);
+    expect(csp).not.toContain("script-src");
   });
 
   it("missing, tampered or expired cookie: 400 expired", async () => {
