@@ -91,7 +91,7 @@ test("unlink confirms, then removes the row", async () => {
   ).toBeInTheDocument();
   await user.click(within(dialog).getByRole("button", { name: "Unlink" }));
   await waitFor(() => expect(screen.queryByText(AUD)).not.toBeInTheDocument());
-  expect(await screen.findByText(`Unlinked ${AUD}`)).toBeInTheDocument();
+  expect(await screen.findByText(`Unlinked ${AUD}.`)).toBeInTheDocument();
   expect(
     screen.getByText("Link one from the app's settings."),
   ).toBeInTheDocument();

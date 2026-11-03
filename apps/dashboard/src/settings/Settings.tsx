@@ -34,7 +34,7 @@ export function Settings() {
     unlink.mutateAsync(aud).then(
       () => {
         if (!isSignedIn(qc)) return;
-        toast.success(`Unlinked ${aud}`, { duration: 8000 });
+        toast.success(`Unlinked ${aud}.`, { duration: 8000 });
       },
       (e: unknown) => {
         if (!isSignedIn(qc)) return;
