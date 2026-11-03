@@ -320,6 +320,70 @@ describe("install: Codex (C26e)", () => {
   });
 });
 
+describe("install: Codex restart hint (C27k)", () => {
+  const FIXTURE = readFileSync(
+    new URL("./fixtures/codex-config.toml", import.meta.url),
+    "utf8",
+  );
+  const DAEMON =
+    "[[success]]✓[[/success]]  Daemon running as a launchd service  [[muted]]pid 48213[[/muted]]";
+  const HINT = [
+    "   Restart the Codex app and open Codex sessions to load the new OpenBus.",
+    "",
+  ];
+  /** Codex configured, and a daemon answering with each version in turn (undefined: none). */
+  const withDaemon = (versions: (string | undefined)[], codex = true) => {
+    let i = 0;
+    const ctx = fakeCtx({
+      fetch: hub([approved]),
+      ...allHarnesses({
+        which: () => false,
+        status: vi.fn(async () => {
+          const v = versions[Math.min(i++, versions.length - 1)];
+          if (v === undefined) throw new Error("ECONNREFUSED");
+          return { ...withAgents(), version: v };
+        }),
+      }),
+    });
+    const codexHome = join(ctx.userHome, "codex");
+    if (codex) {
+      mkdirSync(codexHome);
+      writeFileSync(join(codexHome, "config.toml"), FIXTURE);
+    }
+    ctx.env = { CODEX_HOME: codexHome, PATH: "" };
+    return ctx;
+  };
+  const belowDaemon = (ctx: Fake) => {
+    const out = ctx.out();
+    const at = out.indexOf(DAEMON);
+    expect(at).toBeGreaterThan(-1);
+    return out.slice(at + 1, at + 3);
+  };
+
+  it("tells the user to restart Codex after the daemon is upgraded", async () => {
+    const ctx = withDaemon(["0.60.0", "0.61.1"]);
+    expect(await run(ctx)).toBe(0);
+    expect(belowDaemon(ctx)).toEqual(HINT);
+  });
+
+  it("and after a first install, when no daemon ran before", async () => {
+    const ctx = withDaemon([undefined, "0.61.1"]);
+    expect(await run(ctx)).toBe(0);
+    expect(belowDaemon(ctx)).toEqual(HINT);
+  });
+
+  it("not when the same version was already running, or Codex is not configured", async () => {
+    for (const ctx of [
+      withDaemon(["0.61.1"]),
+      withDaemon(["0.60.0", "0.61.1"], false),
+    ]) {
+      expect(await run(ctx)).toBe(0);
+      expect(belowDaemon(ctx)).toEqual(["", expect.any(String)]);
+      expect(ctx.out().join("\n")).not.toContain("Restart the Codex app");
+    }
+  });
+});
+
 describe("install: daemon confirmation", () => {
   it("prints Daemon running only after the socket answers", async () => {
     let calls = 0;

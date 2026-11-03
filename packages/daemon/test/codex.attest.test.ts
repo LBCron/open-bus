@@ -31,6 +31,7 @@ import {
   holdsFileLinux,
   type Proc,
   psRows,
+  staleRefusal,
 } from "../src/codex-attest.ts";
 import { daemonHarness, hello, stopAll } from "./helpers.ts";
 
@@ -879,7 +880,6 @@ describe("codex code-mode attestation (C27)", () => {
     });
     const check = codexAttestor({ home, ...fakeProcs() });
     for (const h of [
-      codeHello({ item_id: undefined }),
       codeHello({ turn_id: undefined }),
       codeHello({ call_id: "call_exec1" }),
       codeHello({ call_id: "exec-XYZ" }),
@@ -890,6 +890,53 @@ describe("codex code-mode attestation (C27)", () => {
       expect(check.attestNow(h)).toEqual(no);
     // None of those spent the exec.
     expect(check.attestNow(codeHello())).toEqual(ok);
+  });
+
+  it("tells an adapter from before C27a, which sends no item id, to restart Codex (C27k)", async () => {
+    const stale = { ok: false, reason: CODEX_REFUSALS.staleAdapter };
+    expect(CODEX_REFUSALS.staleAdapter).toBe(
+      "its OpenBus server is older than the daemon. Ask the user to restart the Codex app.",
+    );
+    const { home } = cmHome();
+    const sleep = vi.fn(async () => {});
+    const check = codexAttestor({ home, ...fakeProcs(), sleep });
+    expect(check.attestNow(codeHello({ item_id: undefined }))).toEqual(stale);
+    // No wait: no item id ever lands.
+    expect(await check.attest(codeHello({ item_id: undefined }))).toEqual(
+      stale,
+    );
+    expect(sleep).not.toHaveBeenCalled();
+    // Nothing was admitted or spent: the same call with its item id still is.
+    expect(check.attestNow(codeHello())).toEqual(ok);
+  });
+
+  it("names both versions when the hello's marker shows the adapter is older (C27k)", async () => {
+    const { home } = cmHome();
+    const check = codexAttestor({ home, ...fakeProcs(), version: "0.61.1" });
+    const old = codexHello(
+      { thread_id: CM_THREAD, call_id: EXEC1, turn_id: TURN },
+      { agent_ref: CM_THREAD, client_version: "0.61.0" },
+    );
+    expect(check.attestNow(old)).toEqual({
+      ok: false,
+      reason:
+        "its OpenBus server (0.61.0) is older than the daemon (0.61.1). Ask the user to restart the Codex app.",
+    });
+    // Not older, absent, odd, or a dev build: the plain text.
+    for (const [client, daemon] of [
+      ["0.61.1", "0.61.1"],
+      [undefined, "0.61.1"],
+      ["0.61.0-x", "0.61.1"],
+      ["0.61.0", "0.0.0"],
+    ] as const)
+      expect(staleRefusal(client, daemon)).toBe(CODEX_REFUSALS.staleAdapter);
+  });
+
+  it("keeps a function_call id with no item id as before (C27k)", async () => {
+    const { home } = codexHome();
+    const check = codexAttestor({ home, ...fakeProcs(), retryMs: 0 });
+    expect(check.attestNow(codexHello({ call_id: "call_nope" }))).toEqual(no);
+    expect(check.attestNow(codexHello())).toEqual(ok);
   });
 
   it("keeps the function_call rule first: an item id changes nothing there", async () => {
