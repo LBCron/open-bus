@@ -18,8 +18,6 @@ import {
   type Me,
   MeSchema,
   R,
-  type Role,
-  RolesResponseSchema,
 } from "./contract";
 import { qk } from "./qk";
 
@@ -191,15 +189,9 @@ export const useRevokeMachine = () => {
   });
 };
 
-export type RolesData = { roles: Role[] };
 export type LinkedAppsData = { apps: LinkedApp[] };
 
-const REMOVE_ROLE_KEY = [...qk.roles, "remove"] as const;
 const UNLINK_KEY = [...qk.linkedApps, "unlink"] as const;
-
-type RoleId = Pick<Role, "namespace" | "role">;
-/** Role names may hold spaces, so a plain join could collide. */
-const roleId = (r: RoleId) => JSON.stringify([r.namespace, r.role]);
 
 /**
  * Pending removals (by `mutationKey`) as ids, overlaid at read time like
@@ -214,23 +206,6 @@ const usePendingIds = (
     filters: { mutationKey, status: "pending" },
     select: (m) => id(m.state.variables as never),
   });
-
-export const useRoles = () => {
-  const query = useQuery({
-    queryKey: qk.roles,
-    queryFn: ({ signal }) => api.get(R.roles, RolesResponseSchema, signal),
-    staleTime: 10_000,
-  });
-  const pending = usePendingIds(REMOVE_ROLE_KEY, roleId);
-  const key = pending.join();
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `key` encodes `pending`
-  const data = useMemo<RolesData | undefined>(() => {
-    if (!query.data || pending.length === 0) return query.data;
-    const gone = new Set(pending);
-    return { roles: query.data.roles.filter((r) => !gone.has(roleId(r))) };
-  }, [query.data, key]);
-  return Object.assign(stateOf(query), { data });
-};
 
 /** `data` is `null` when the bus answers 404: no linked-apps API there yet. */
 export const useLinkedApps = () => {
@@ -264,48 +239,6 @@ const deleteOk = (path: string) =>
       return;
     throw e;
   });
-
-/**
- * PUT /api/v1/roles/:ns/:role. Not optimistic: the server's 400/409 message
- * is shown inline, so the caller reads the rejection. Role holders ride on
- * agent rows, so agents refetch too.
- */
-export const useSetRole = () => {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (v: { namespace: string; role: string; agentId: string }) =>
-      api.send("PUT", R.role(v.namespace, v.role), { agentId: v.agentId }),
-    onSettled: () =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: qk.roles }),
-        qc.invalidateQueries({ queryKey: qk.agents }),
-      ]),
-  });
-};
-
-/**
- * DELETE /api/v1/roles/:ns/:role. Optimistic through `useRoles`' overlay of
- * pending removals, not the cache, so there is nothing to roll back.
- */
-export const useRemoveRole = () => {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationKey: REMOVE_ROLE_KEY,
-    mutationFn: (v: RoleId) => deleteOk(R.role(v.namespace, v.role)),
-    // Server-confirmed: that one row is gone even if the refetch below fails.
-    onSuccess: (_d, v) => {
-      qc.setQueryData<RolesData>(qk.roles, (old) =>
-        old ? { roles: old.roles.filter((r) => roleId(r) !== roleId(v)) } : old,
-      );
-    },
-    // Returned, so the mutation (and its overlay) stays pending until the refetch lands.
-    onSettled: () =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: qk.roles }),
-        qc.invalidateQueries({ queryKey: qk.agents }),
-      ]),
-  });
-};
 
 /**
  * DELETE /api/v1/linked-apps/:aud. Optimistic through `useLinkedApps`'

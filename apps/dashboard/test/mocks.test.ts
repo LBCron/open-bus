@@ -80,7 +80,7 @@ test("GET endpoints answer from the fixtures, live and queued agents, newest mac
   const me = await (await fetch("/api/v1/me")).json();
   expect(me.user.name).toBeNull();
   const all = await (await fetch("/api/v1/agents")).json();
-  // The mock adds statuses and roles on top of the shared fixtures.
+  // The mock adds statuses on top of the shared fixtures.
   expect(all.agents).toEqual(
     fixtures.agents.map((a) => expect.objectContaining(a)),
   );
@@ -299,58 +299,25 @@ test("revoking laptop drops its queued agent and keeps the machine listed as rev
   expect(row?.revokedAt).not.toBeNull();
 });
 
-test("the mock bus seeds a held role, a vacant role, a linked app and agent statuses", () => {
+test("the mock bus seeds a linked app and agent statuses", () => {
   const bus = createMockBus();
-  const roles = bus.roles();
-  expect(roles.some((r) => r.agentId !== null)).toBe(true);
-  expect(roles.some((r) => r.agentId === null)).toBe(true);
   expect(bus.apps()).toEqual([
     { aud: "https://oa.example", linkedAt: expect.any(String) },
   ]);
   expect(bus.agents().some((a) => a.status === "working")).toBe(true);
-  const holder = roles.find((r) => r.agentId !== null);
-  expect(bus.agents().find((a) => a.id === holder?.agentId)?.role).toBe(
-    holder?.role,
-  );
 });
 
-test("setRole: 204, 400 with details.field, 409; removeRole and unlink: 204 then 404", async () => {
+test("unlink: 204 then 404", async () => {
   const bus = createMockBus();
-  const ns = "github.com/acme/app";
-  const free = fixtures.agents.find((a) => a.name === "opencode-1");
-  const ok = await bus.setRole(ns, "lane-7", { agentId: free?.id });
-  expect(ok.status).toBe(204);
-  expect(bus.agents().find((a) => a.id === free?.id)?.role).toBe("lane-7");
-
-  const gone = await bus.setRole(ns, "lane-8", { agentId: "nopenopenopenope" });
-  expect(gone.status).toBe(400);
-  expect((await gone.json()).error.details).toEqual({ field: "agentId" });
-  const badRole = await bus.setRole(ns, "bad/name", { agentId: free?.id });
-  expect((await badRole.json()).error.details).toEqual({ field: "role" });
-
-  const named = await bus.setRole(ns, "claude-1", { agentId: free?.id });
-  expect(named.status).toBe(409);
-  const twice = await bus.setRole(ns, "lane-9", { agentId: free?.id });
-  expect(twice.status).toBe(409);
-
-  expect((await bus.removeRole(ns, "lane-7")).status).toBe(204);
-  expect((await bus.removeRole(ns, "lane-7")).status).toBe(404);
   expect((await bus.unlink("https://oa.example")).status).toBe(204);
   expect((await bus.unlink("https://oa.example")).status).toBe(404);
 });
 
-test("the role and linked-app routes demand the CSRF header", async () => {
+test("the linked-app routes demand the CSRF header", async () => {
   const bus = createMockBus();
   server.use(...handlersFor(bus));
-  const ns = encodeURIComponent("github.com/acme/app");
-  const put = await fetch(`http://x.test/api/v1/roles/${ns}/lane-6`, {
-    method: "PUT",
-    body: "{}",
-  });
-  expect(put.status).toBe(403);
-  const del = await fetch(
-    `http://x.test/api/v1/linked-apps/${encodeURIComponent("https://oa.example")}`,
-    { method: "DELETE", headers: CSRF },
-  );
+  const url = `http://x.test/api/v1/linked-apps/${encodeURIComponent("https://oa.example")}`;
+  expect((await fetch(url, { method: "DELETE" })).status).toBe(403);
+  const del = await fetch(url, { method: "DELETE", headers: CSRF });
   expect(del.status).toBe(204);
 });

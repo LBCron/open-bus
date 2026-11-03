@@ -3,6 +3,5 @@ export const qk = {
   me: ["me"] as const,
   machines: ["machines"] as const,
   agents: ["agents"] as const,
-  roles: ["roles"] as const,
   linkedApps: ["linked-apps"] as const,
 };
