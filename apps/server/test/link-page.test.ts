@@ -19,6 +19,10 @@ it("renders the confirm page", () => {
   expect(html).toContain('name="decision" value="cancel">Cancel<');
   expect(html).toContain("<code>https://oa.example</code>");
   expect(html).toContain("You can unlink it any time in Settings.");
+  expect(html).toContain(
+    "A card names the agent, its machine, and what the agent says it is doing.",
+  );
+  expect(html).not.toContain("machine and role");
 });
 
 it("escapes aud and never links it", () => {

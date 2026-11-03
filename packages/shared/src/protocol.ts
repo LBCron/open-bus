@@ -212,8 +212,9 @@ const RosterAgent = z.strictObject({
   state: z.enum(["live", "queued"]),
   /** The agent's machine label (B13). Optional: older hubs omit it. */
   machine_label: MachineLabelSchema.optional(),
-  /** Agent card fields: sent only at or above AGENT_CARD_MIN_CLIENT. */
+  /** @deprecated never sent since #394; removal tracked in #396 */
   role: BusNameSchema.optional(),
+  /** Agent card fields: sent only at or above AGENT_CARD_MIN_CLIENT. */
   status: StatusStateSchema.optional(),
   status_label: StatusLabelSchema.optional(),
   status_at: IsoTimeSchema.optional(),

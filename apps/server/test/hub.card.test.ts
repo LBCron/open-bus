@@ -141,23 +141,13 @@ async function card(d: Daemon, ref: string, aud: string): Promise<string> {
 }
 
 describe("card_request (AC4c)", () => {
-  it("signs a card that verifies against the JWKS, with role and the applied status", async () => {
+  it("signs a card that verifies against the JWKS, with the applied status", async () => {
     await setClock(NOW);
     await setCardEnv(KEYS);
     const aud = newAud();
     expect(await stub().linkApp(aud)).toBe(true);
     const d = await at();
     const agentId = await register(d, "ses_a", "Carder");
-    const namespace = await inOwnerHub(
-      (s) =>
-        s.storage.sql
-          .exec<{ n: string }>(
-            "select namespace as n from agents where id = ?",
-            agentId,
-          )
-          .one().n,
-    );
-    expect(await stub().putRole(namespace, "Reviewer", agentId)).toBe("ok");
     // Applied at once, then a coalesced (pending) one that must not show.
     for (const [state, label] of [
       ["working", "on it"],
@@ -195,13 +185,12 @@ describe("card_request (AC4c)", () => {
       exp: iat + CARD_TTL_SEC,
       jti: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
       name: "Carder",
-      role: "Reviewer",
       kind: "opencode",
       machine: "Card Mac",
       agent_says: { status: "working", label: "on it" },
     });
     expect(Number(payload.exp) - Number(payload.iat)).toBe(300);
-    for (const k of ["email", "namespace", "machine_id", "machineId"])
+    for (const k of ["email", "namespace", "machine_id", "machineId", "role"])
       expect(payload).not.toHaveProperty(k);
     expect(() => CardClaimsSchema.parse(payload)).not.toThrow();
     // A fresh jti every time.
@@ -210,7 +199,7 @@ describe("card_request (AC4c)", () => {
     d.close();
   });
 
-  it("leaves out role and agent_says when there is none", async () => {
+  it("never carries role, and leaves out agent_says when there is none", async () => {
     await setClock(NOW);
     await setCardEnv(KEYS);
     const aud = newAud();
@@ -571,33 +560,6 @@ describe("re-checks after the signing await (AC4c)", () => {
       client_version: AGENT_CARD_MIN_CLIENT,
     });
     await reply(d, h);
-    release();
-    await settled();
-    expect(framesSeen(d).filter((f) => f.id === fid)).toEqual([]);
-    d.close();
-  });
-
-  it("a role holder closed and reopened mid-sign (role vacated) gets nothing", async () => {
-    let namespace = "";
-    const { d, fid, release } = await held(
-      "ses_o",
-      "Reopen",
-      async (agentId) => {
-        namespace = await inOwnerHub(
-          (s) =>
-            s.storage.sql
-              .exec<{ n: string }>(
-                "select namespace as n from agents where id = ?",
-                agentId,
-              )
-              .one().n,
-        );
-        expect(await stub().putRole(namespace, "Lead", agentId)).toBe("ok");
-      },
-    );
-    d.send({ v: 1, id: id("dn"), type: "agent_down", agent_ref: "ses_o" });
-    d.send(up(id("u"), "ses_o", "Reopen", namespace));
-    await waitFor(d, "agent_ok");
     release();
     await settled();
     expect(framesSeen(d).filter((f) => f.id === fid)).toEqual([]);

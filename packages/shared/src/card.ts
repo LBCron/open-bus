@@ -6,9 +6,9 @@ import { BusNameSchema } from "./names.js";
 import { MachineLabelSchema } from "./refs.js";
 
 /**
- * Agent card: roles, status and a signed card (spec 2026-10-29). The first
- * daemon release that decodes the new server-to-daemon fields and frames
- * (roster `role`/`status*`, receipt `to_name`, `role_vacant`, `card`,
+ * Agent card: status and a signed card (spec 2026-10-29; roles removed in
+ * #394). The first daemon release that decodes the new server-to-daemon
+ * fields and frames (roster `status*`, receipt `to_name`, `card`,
  * `card_refused`). Below it the hub withholds them. v0.54.0 was cut before
  * AC1 merged (#300), so the first release with these schemas is 0.55.0.
  */
@@ -106,6 +106,7 @@ export const CardClaimsSchema = z
     exp: SecSchema,
     jti: JtiSchema,
     name: BusNameSchema,
+    /** @deprecated never sent since #394; removal tracked in #396 */
     role: BusNameSchema.optional(),
     kind: KindTokenSchema,
     machine: MachineLabelSchema,

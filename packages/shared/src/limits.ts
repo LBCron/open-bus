@@ -38,8 +38,6 @@ export const LIMITS = {
   maxAgentsPerMachine: 200,
   /** Machines listed by GET /api/v1/machines and the dashboard feed's machines frame. */
   maxMachinesListed: 100,
-  /** Roles per hub (GET /api/v1/roles); a PUT past it is refused 409 conflict. */
-  maxRoles: 1000,
 } as const;
 
 const enc = new TextEncoder();
