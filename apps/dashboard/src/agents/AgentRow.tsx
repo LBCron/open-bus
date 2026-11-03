@@ -57,13 +57,6 @@ export function AgentRow({
               <bdi className="font-mono font-medium [overflow-wrap:anywhere]">
                 {name}
               </bdi>
-              {agent.role && (
-                // Owner-set, so a solid outline: never the dashed agent-says style.
-                <Badge variant="outline" className="font-mono font-medium">
-                  <span className="sr-only">Role </span>
-                  {agent.role}
-                </Badge>
-              )}
               {agent.global && (
                 <Badge
                   variant="secondary"

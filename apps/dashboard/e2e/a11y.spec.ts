@@ -208,28 +208,6 @@ const SCREENS: Screen[] = [
       ).toBeVisible(),
   },
   {
-    name: "roles",
-    path: "/roles",
-    ready: (p) =>
-      expect(p.getByRole("row").filter({ hasText: "lane-6" })).toBeVisible(),
-  },
-  {
-    name: "add-role dialog",
-    path: "/roles",
-    ready: async (p) => {
-      await p.getByRole("button", { name: "Add role" }).click();
-      await expect(p.getByRole("dialog", { name: "Add role" })).toBeVisible();
-    },
-  },
-  {
-    name: "remove-role dialog",
-    path: "/roles",
-    ready: async (p) => {
-      await p.getByRole("button", { name: "Remove reviewer" }).click();
-      await expect(p.getByRole("alertdialog")).toBeVisible();
-    },
-  },
-  {
     name: "settings",
     path: "/settings",
     ready: (p) =>

@@ -8,10 +8,7 @@ import {
   type MachinesData,
   useLinkedApps,
   useMachines,
-  useRemoveRole,
   useRevokeMachine,
-  useRoles,
-  useSetRole,
   useUnlinkApp,
 } from "../src/api/queries";
 import { makeQueryClient } from "../src/api/queryClient";
@@ -428,80 +425,12 @@ test("a consumer that reads only the data doesn't re-render on fetch-state chang
   });
 });
 
-const NS = "github.com/acme/app";
-const role = {
-  namespace: NS,
-  role: "lane-6",
-  agentId: "kpbHbMX4JAq8FDqg",
-  setAt: "2026-10-29T10:00:00Z",
-};
 const AUD = "https://oa.example:8443";
 const app = { aud: AUD, linkedAt: "2026-10-29T10:00:00Z" };
-const roleUrl = `*/api/v1/roles/${encodeURIComponent(NS)}/lane-6`;
 const failWith = (status: number, code: string) =>
   HttpResponse.json({ error: { code, message: "x" } }, { status });
 
-test("useSetRole PUTs the body with the CSRF header, then refetches roles", async () => {
-  let roles = [] as unknown[];
-  let seen: { body: unknown; csrf: string | null } | undefined;
-  server.use(
-    http.get("*/api/v1/roles", () => HttpResponse.json({ roles })),
-    http.put(roleUrl, async ({ request }) => {
-      seen = {
-        body: await request.json(),
-        csrf: request.headers.get("x-ob-request"),
-      };
-      roles = [role];
-      return new HttpResponse(null, { status: 204 });
-    }),
-  );
-  const { wrapper } = wrap();
-  const list = renderHook(() => useRoles(), { wrapper });
-  await waitFor(() => expect(list.result.current.data?.roles).toEqual([]));
-  const set = renderHook(() => useSetRole(), { wrapper });
-  await act(() =>
-    set.result.current.mutateAsync({
-      namespace: NS,
-      role: "lane-6",
-      agentId: role.agentId,
-    }),
-  );
-  expect(seen).toEqual({ body: { agentId: role.agentId }, csrf: "1" });
-  await waitFor(() => expect(list.result.current.data?.roles).toHaveLength(1));
-});
-
-test("useSetRole surfaces a server rejection", async () => {
-  server.use(http.put(roleUrl, () => failWith(409, "conflict")));
-  const { wrapper } = wrap();
-  const set = renderHook(() => useSetRole(), { wrapper });
-  await act(async () => {
-    await expect(
-      set.result.current.mutateAsync({
-        namespace: NS,
-        role: "lane-6",
-        agentId: role.agentId,
-      }),
-    ).rejects.toMatchObject({ code: "conflict" });
-  });
-});
-
 const removeCases = [
-  {
-    name: "useRemoveRole",
-    list: () =>
-      http.get("*/api/v1/roles", () => HttpResponse.json({ roles: [role] })),
-    del: (status: number) =>
-      http.delete(roleUrl, async () => {
-        await new Promise((r) => setTimeout(r, 150));
-        return status === 204
-          ? new HttpResponse(null, { status })
-          : failWith(status, status === 404 ? "not_found" : "internal");
-      }),
-    useList: () => useRoles(),
-    useRemove: () => useRemoveRole(),
-    arg: { namespace: NS, role: "lane-6" } as never,
-    rows: (d: unknown) => (d as { roles?: unknown[] } | undefined)?.roles,
-  },
   {
     name: "useUnlinkApp",
     list: () =>
@@ -542,13 +471,7 @@ for (const c of removeCases) {
       expect(c.rows(list.result.current.data)).toHaveLength(0),
     );
     server.use(
-      http.get(
-        c.name === "useRemoveRole" ? "*/api/v1/roles" : "*/api/v1/linked-apps",
-        () =>
-          HttpResponse.json(
-            c.name === "useRemoveRole" ? { roles: [] } : { apps: [] },
-          ),
-      ),
+      http.get("*/api/v1/linked-apps", () => HttpResponse.json({ apps: [] })),
     );
     await act(() => p);
     expect(c.rows(list.result.current.data)).toHaveLength(0);
@@ -584,13 +507,7 @@ for (const c of removeCases) {
     );
     const rm = renderHook(() => c.useRemove(), { wrapper });
     server.use(
-      http.get(
-        c.name === "useRemoveRole" ? "*/api/v1/roles" : "*/api/v1/linked-apps",
-        () =>
-          HttpResponse.json(
-            c.name === "useRemoveRole" ? { roles: [] } : { apps: [] },
-          ),
-      ),
+      http.get("*/api/v1/linked-apps", () => HttpResponse.json({ apps: [] })),
     );
     await act(() => rm.result.current.mutateAsync(c.arg));
     expect(rm.result.current.isError).toBe(false);
@@ -600,35 +517,12 @@ for (const c of removeCases) {
   });
 }
 
-const role2 = { ...role, role: "reviewer" };
 const app2 = { aud: "https://b.example", linkedAt: "2026-10-29T10:00:00Z" };
-const roleDel = (r: typeof role) =>
-  `*/api/v1/roles/${encodeURIComponent(r.namespace)}/${r.role}`;
 const appDel = (a: typeof app) =>
   `*/api/v1/linked-apps/${encodeURIComponent(a.aud)}`;
 
 /** Two rows per list, so one removal can be told from the other. */
 const overlayCases = [
-  {
-    name: "useRemoveRole",
-    key: qk.roles,
-    listUrl: "*/api/v1/roles",
-    body: (rows: unknown[]) => ({ roles: rows }),
-    a: {
-      row: role,
-      del: roleDel(role),
-      arg: { namespace: NS, role: "lane-6" },
-    },
-    b: {
-      row: role2,
-      del: roleDel(role2),
-      arg: { namespace: NS, role: "reviewer" },
-    },
-    useList: () => useRoles(),
-    useRemove: () =>
-      useRemoveRole() as { mutateAsync(v: never): Promise<void> },
-    rows: (d: unknown) => (d as { roles?: unknown[] } | undefined)?.roles,
-  },
   {
     name: "useUnlinkApp",
     key: qk.linkedApps,
