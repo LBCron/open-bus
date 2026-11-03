@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const PAGES = ["machines", "live"];
+const PAGES = ["machines", "live", "settings"];
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 const base = readFileSync(here("./screens.css"), "utf8");
 

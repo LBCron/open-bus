@@ -1008,17 +1008,15 @@ Then report to `openbus-e0` in three lines or fewer: what shipped, what contract
 
 Spec: `docs/superpowers/specs/2026-10-29-agent-card-design.md` (Delivery row 6). Frontend's behavior and copy: `04-frontend.md` Part 2 (#292). Options page for the user: https://artifacts.leourbina.com/a/Z9ZvBeNzmAGftQrM
 
-**Files:** create `design/screens/roles.html`, `design/screens/link-confirm.html`; modify `design/screens/live.html` (status column, role badge), `design/screens/README.md`. The Linked apps section goes in a new `design/screens/settings.html`.
+**Files:** create `design/screens/settings.html` (Linked apps), `design/screens/link-confirm.html`; modify `design/screens/live.html` (status column), `design/screens/README.md`, `packages/ui/scripts/build-screens.mjs` (builds `settings.css`), `packages/ui/test/screens.test.ts`. Roles are dropped (#340, removal in #394): no roles screen, no role badge; agents show by session name (renameable later, #393).
 
-1. Publish options (done): roles (page or panel), status (column or inline), linked apps (Settings or Machines), link confirm (full or minimal). Recommended: Roles page, status column, Settings › Linked apps, full confirm.
+1. Publish options (done): status (column or inline), linked apps (Settings or Machines), link confirm (full or minimal). Picked: 2A status column, 3A Settings › Linked apps, 4A full confirm. The roles question is moot since #340.
 2. On the user's pick, build the screens at 1280 and 390 px, in light and dark, with the states Frontend's tests need:
-   - roles: default, empty, Vacant, the add and re-point dialogs, a 400 error inside the dialog, the remove confirm;
    - status: every state, a 64-character label, no status, an unknown state;
-   - linked apps: default, empty, the unlink confirm, a punycode `aud` and an `aud` with a port;
+   - linked apps: default, empty, loading, error, the unlink confirm and its toast, a punycode `aud` and an `aud` with a port;
    - link confirm: under 8 KB when filled at maximum lengths, with no JavaScript.
 3. Rules:
    - Status is never colour alone, and is always tagged "agent says". It uses a dashed, unfilled pill so it never reads as the attested Reachable badge.
-   - Vacant uses the warning colour plus the word.
    - Every `aud` is shown whole, in mono, inside `<bdi>`, and never as a link.
    - No em dashes, including as the empty placeholder (use "None").
 4. Hand off to Frontend (AC6.2 to AC6.5). Review FE's PRs against the screens.
