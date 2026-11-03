@@ -1,6 +1,6 @@
 // AC4c Task 9: GET /link, GET/POST /link/confirm.
 import { env } from "cloudflare:workers";
-import { CARD_TTL_SEC, LINK_TYP, MAX_LINKED_APPS, R } from "@ob/shared";
+import { AUTH, CARD_TTL_SEC, LINK_TYP, MAX_LINKED_APPS, R } from "@ob/shared";
 import { TEST_CARD_JWK } from "@ob/shared/mocks";
 import {
   createLocalJWKSet,
@@ -263,15 +263,64 @@ describe("GET /link/confirm", () => {
     const r = await confirmPage(await begin(aud));
     expect(r.status).toBe(200);
     const csp = r.headers.get("content-security-policy") ?? "";
-    expect(csp).toContain(`form-action 'self' ${aud};`);
-    expect(csp).toContain("frame-ancestors 'none'");
-    expect(csp).toContain("default-src 'none'");
+    expect(csp).toBe(
+      `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self' ${aud} https://${DEV.ACCESS_TEAM_DOMAIN}; frame-ancestors 'none'`,
+    );
     expect(r.headers.get("cache-control")).toBe("no-store");
     expect(r.headers.get("referrer-policy")).toBe("same-origin");
     const html = await r.text();
-    expect(html).toContain(`<code>${aud}</code>`);
+    expect(html).toContain(`<bdi>${aud}</bdi>`);
+    expect(html).toContain(
+      `<form id="switch" method="post" action="${ORIGIN}/auth/logout?then=login&amp;next=${encodeURIComponent(R.linkConfirm)}"></form>`,
+    );
     expect(html).toMatch(/name="csrf" value="[^"]+"/);
     expect(html).toContain(`action="${R.linkConfirm}"`);
+  });
+
+  it("Not you? round trip: the ob_link cookie survives sign-out and works with the new session", async () => {
+    const aud = newAud();
+    const link = await begin(aud);
+    const csrfOf = async (r: Response) => {
+      expect(r.status).toBe(200);
+      return /name="csrf" value="([^"]+)"/.exec(await r.text())?.[1] ?? "";
+    };
+    const oldCsrf = await csrfOf(await confirmPage(link));
+    const out = await call(
+      `${AUTH.logout}?then=login&next=${encodeURIComponent(R.linkConfirm)}`,
+      DEV,
+      {
+        method: "POST",
+        headers: {
+          origin: ORIGIN,
+          cookie: `${await sessionCookie()}; ${linkCookieName(DEV)}=${link}`,
+        },
+      },
+    );
+    expect(out.status).toBe(303);
+    expect(out.headers.get("location")).toBe(
+      `${AUTH.login}?next=${encodeURIComponent(R.linkConfirm)}`,
+    );
+    expect(out.headers.get("set-cookie") ?? "").not.toContain(
+      linkCookieName(DEV),
+    );
+    // sessionCookie() now signs with the bumped generation: a fresh session.
+    const newCsrf = await csrfOf(await confirmPage(link));
+    expect(newCsrf).not.toBe(oldCsrf);
+    expect((await post(link, "allow", { csrf: oldCsrf })).status).toBe(403);
+    const r = await post(link, "allow", { csrf: newCsrf });
+    expect(r.status).toBe(303);
+    expect(fragment(r).get("assertion")).toBeTruthy();
+  });
+
+  it("CSP falls back to 'self' plus aud when ACCESS_TEAM_DOMAIN is not a hostname", async () => {
+    const aud = newAud();
+    const e = { ...DEV, ACCESS_TEAM_DOMAIN: "x; script-src *" };
+    const r = await confirmPage(await begin(aud, e), e);
+    expect(r.status).toBe(200);
+    const csp = r.headers.get("content-security-policy") ?? "";
+    expect(csp).toBe(
+      `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self' ${aud}; frame-ancestors 'none'`,
+    );
   });
 
   it("missing, tampered or expired cookie: 400 expired", async () => {
