@@ -263,11 +263,9 @@ describe("GET /link/confirm", () => {
     const r = await confirmPage(await begin(aud));
     expect(r.status).toBe(200);
     const csp = r.headers.get("content-security-policy") ?? "";
-    expect(csp).toContain(
-      `form-action 'self' ${aud} https://${DEV.ACCESS_TEAM_DOMAIN};`,
+    expect(csp).toBe(
+      `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self' ${aud} https://${DEV.ACCESS_TEAM_DOMAIN}; frame-ancestors 'none'`,
     );
-    expect(csp).toContain("frame-ancestors 'none'");
-    expect(csp).toContain("default-src 'none'");
     expect(r.headers.get("cache-control")).toBe("no-store");
     expect(r.headers.get("referrer-policy")).toBe("same-origin");
     const html = await r.text();
@@ -285,8 +283,9 @@ describe("GET /link/confirm", () => {
     const r = await confirmPage(await begin(aud, e), e);
     expect(r.status).toBe(200);
     const csp = r.headers.get("content-security-policy") ?? "";
-    expect(csp).toContain(`form-action 'self' ${aud};`);
-    expect(csp).not.toContain("script-src");
+    expect(csp).toBe(
+      `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self' ${aud}; frame-ancestors 'none'`,
+    );
   });
 
   it("missing, tampered or expired cookie: 400 expired", async () => {
