@@ -40,7 +40,7 @@ export function StatusCell({ agent }: { agent: Agent }) {
         <span className="min-w-0 whitespace-normal [overflow-wrap:anywhere] max-md:basis-full">
           {statusLabel && <bdi>{statusLabel}</bdi>}
           {statusAt && (
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs whitespace-nowrap text-muted-foreground">
               {statusLabel && " · "}
               {ago(statusAt)}
             </span>
