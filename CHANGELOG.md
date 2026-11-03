@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.62.0](https://github.com/open-artifacts-ai/open-bus/compare/v0.61.2...v0.62.0) (2026-11-03)
+
+
+### Features
+
+* **design:** agent card screens without roles (D16) ([#405](https://github.com/open-artifacts-ai/open-bus/issues/405)) ([5357130](https://github.com/open-artifacts-ai/open-bus/commit/535713020d7ebc6aab2362e39c93a033bc067ad2))
+
 ## [0.61.2](https://github.com/open-artifacts-ai/open-bus/compare/v0.61.1...v0.61.2) (2026-11-03)
 
 
