@@ -706,6 +706,7 @@ export function copy(style: Style) {
       done(
         `${clip(dir, 60)} is now global. Agents started there see every namespace.`,
       ),
+      p("muted", "   Only that directory: its subdirectories are not global."),
       p("muted", "   Sessions already running there change when they restart."),
     ],
     globalAlready: (dir: string) => done(`${clip(dir, 22)} is already global.`),

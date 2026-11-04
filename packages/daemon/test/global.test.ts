@@ -47,7 +47,7 @@ describe("C19: the global allowlist", () => {
     expect(log.mock.calls.filter(([m]) => /global/.test(m))).toHaveLength(1);
   });
 
-  it("an allowlisted dir and its subdir are global; a sibling sharing its prefix is not", () => {
+  it("an allowlisted dir is global, and nothing under or beside it is (#397)", () => {
     const root = tmp();
     for (const d of ["ops", "ops/deep", "opsx"]) mkdirSync(join(root, d));
     const deps = {
@@ -55,7 +55,8 @@ describe("C19: the global allowlist", () => {
       globalFile: globalFile(homeWith([join(root, "ops")])),
     };
     expect(resolveNamespace(join(root, "ops"), deps).global).toBe(true);
-    expect(resolveNamespace(join(root, "ops/deep"), deps).global).toBe(true);
+    // #397: the allowlist names a directory, not a subtree.
+    expect(resolveNamespace(join(root, "ops/deep"), deps).global).toBe(false);
     expect(resolveNamespace(join(root, "opsx"), deps).global).toBe(false);
     expect(resolveNamespace(root, deps).global).toBe(false);
   });
@@ -71,16 +72,19 @@ describe("C19: the global allowlist", () => {
     expect(resolveNamespace(join(root, "link"), deps).global).toBe(true);
   });
 
-  it("matches by identity on path-segment boundaries", () => {
+  it("matches by identity, exactly: an entry is not a subtree (#397)", () => {
     const root = tmp();
     for (const d of ["a/b/c", "a/bc"])
       mkdirSync(join(root, d), { recursive: true });
     const at = (p: string) => join(root, p);
     expect(isGlobalDir(at("a/b"), [at("a/b")])).toBe(true);
-    expect(isGlobalDir(at("a/b/c"), [at("a/b")])).toBe(true);
+    // The one a subtree rule got wrong: a child is not the entry.
+    expect(isGlobalDir(at("a/b/c"), [at("a/b")])).toBe(false);
     expect(isGlobalDir(at("a/bc"), [at("a/b")])).toBe(false);
     expect(isGlobalDir(at("a"), [at("a/b")])).toBe(false);
-    expect(isGlobalDir(at("a/bc"), ["/"])).toBe(true);
+    // Including the root: `/` is global only for itself.
+    expect(isGlobalDir(at("a/bc"), ["/"])).toBe(false);
+    expect(isGlobalDir("/", ["/"])).toBe(true);
     // A missing entry covers nothing.
     expect(isGlobalDir(at("a/b"), [at("gone")])).toBe(false);
   });

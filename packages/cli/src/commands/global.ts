@@ -59,7 +59,7 @@ export async function global(
       sayErr(ctx, c.globalNotDir(shown(ctx, real ?? given)));
       return 1;
     }
-    // Listed, or under a listed directory: already covered.
+    // Listed already, matched by identity: an entry covers only itself (#397).
     if (isGlobalDir(real, dirs)) {
       say(ctx, c.globalAlready(shown(ctx, real)));
       return 0;
@@ -69,9 +69,9 @@ export async function global(
     say(ctx, c.globalAdded(shown(ctx, real)));
     return 0;
   }
-  // Only an entry itself is removed, matched by identity; a subdirectory it
-  // covers stays global through it. A directory removed since it was added
-  // is matched as given.
+  // Only an entry itself is removed, matched by identity; a subdirectory is a
+  // separate entry (#397). A directory removed since it was added is matched
+  // as given.
   const keep = dirs.filter(
     (d) => d !== given && d !== real && !(real && sameDir(d, real)),
   );

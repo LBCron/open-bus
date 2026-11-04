@@ -11,7 +11,7 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, sep } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { home } from "./config.ts";
 import { readOwnFile } from "./own-file.ts";
 
@@ -73,19 +73,19 @@ const idOf = (path: string, follow = true): string | undefined => {
 const loose = (p: string) => p.normalize("NFC").toLowerCase();
 
 /**
- * Whether `dir` is an entry or lies under one. Membership is identity: `dir`
- * (resolved) or one of its ancestors is the same directory (device and inode)
- * as an entry, so two folders a case- or normalization-sensitive volume keeps
- * apart never match.
+ * Whether `dir` is an entry. Membership is identity and exact: `dir`
+ * (resolved) must be the same directory (device and inode) as an entry, so
+ * two folders a case- or normalization-sensitive volume keeps apart never
+ * match. A subdirectory of an entry is not global (#397): the allowlist names
+ * a directory, not a subtree.
  *
  * An entry counts only while its stored path is still real
  * (`realpathSync.native(entry) === entry`): a repo that turns an allowlisted
  * folder, or one of its parents, into a symlink (`tools -> /`) must not carry
  * global elsewhere. `onStale` hears each entry skipped that way.
  *
- * Only entries whose path is a loose string prefix of `dir`'s are touched, so
- * an unrelated entry on a hung network mount cannot stall a hello; an entry on
- * the cwd's own path can still block its stat.
+ * Only an entry that is a loose string match of `dir` is touched, so an
+ * unrelated entry on a hung network mount cannot stall a hello.
  */
 export function isGlobalDir(
   dir: string,
@@ -99,11 +99,8 @@ export function isGlobalDir(
     return false;
   }
   const near = loose(real);
-  const ids = new Set<string>();
   for (const entry of dirs) {
-    const e = loose(entry);
-    const prefix = e.endsWith(sep) ? e : `${e}${sep}`;
-    if (near !== e && !near.startsWith(prefix)) continue;
+    if (loose(entry) !== near) continue;
     let still: string | undefined;
     try {
       still = realpathSync.native(entry);
@@ -112,15 +109,9 @@ export function isGlobalDir(
       if (still !== undefined) onStale?.(entry);
       continue;
     }
-    const id = idOf(entry, false);
-    if (id !== undefined) ids.add(id);
+    if (sameDir(entry, real)) return true;
   }
-  if (ids.size === 0) return false;
-  for (let d = real; ; d = dirname(d)) {
-    const id = idOf(d);
-    if (id !== undefined && ids.has(id)) return true;
-    if (dirname(d) === d) return false;
-  }
+  return false;
 }
 
 /**
