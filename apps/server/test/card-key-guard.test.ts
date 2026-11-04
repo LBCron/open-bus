@@ -59,6 +59,13 @@ describe("test card key guard (I11)", () => {
     }
   });
 
+  it("HEAD /healthz passes too, so a HEAD probe sees the bus up (#392)", async () => {
+    const e = prod({ CARD_SIGNING_KEY: TEST });
+    expect((await get("/healthz", e, { method: "HEAD" })).status).toBe(200);
+    expect((await get("/healthz", e, { method: "POST" })).status).toBe(503);
+    expect((await get("/", e, { method: "HEAD" })).status).toBe(503);
+  });
+
   it("/healthz still answers, with problem: test_card_key", async () => {
     const r = await get("/healthz", prod({ CARD_SIGNING_KEY: TEST }));
     expect(r.status).toBe(200);

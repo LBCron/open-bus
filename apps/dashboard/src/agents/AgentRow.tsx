@@ -57,13 +57,6 @@ export function AgentRow({
               <bdi className="font-mono font-medium [overflow-wrap:anywhere]">
                 {name}
               </bdi>
-              {agent.role && (
-                // Owner-set, so a solid outline: never the dashed agent-says style.
-                <Badge variant="outline" className="font-mono font-medium">
-                  <span className="sr-only">Role </span>
-                  {agent.role}
-                </Badge>
-              )}
               {agent.global && (
                 <Badge
                   variant="secondary"
@@ -76,16 +69,16 @@ export function AgentRow({
           </div>
         </div>
       </TableCell>
-      <TableCell className="min-w-0 whitespace-normal px-4 [overflow-wrap:anywhere] md:min-w-32 max-md:col-start-1 max-md:row-start-2 max-md:p-0 max-md:pl-4">
+      <TableCell className="whitespace-nowrap px-4 md:min-w-28 max-md:col-start-1 max-md:row-start-2 max-md:p-0 max-md:pl-4">
         {kindLabel(agent.kind)}
       </TableCell>
-      <TableCell className="min-w-0 whitespace-normal px-4 [overflow-wrap:anywhere] md:min-w-40 max-md:col-span-2 max-md:row-start-3 max-md:p-0 max-md:pl-4">
+      <TableCell className="min-w-0 whitespace-normal px-4 md:w-56 md:min-w-56 max-md:col-span-2 max-md:row-start-3 max-md:flex max-md:flex-wrap max-md:items-center max-md:gap-x-1.5 max-md:gap-y-0.5 max-md:p-0 max-md:pl-4">
         <span aria-hidden="true" className="text-muted-foreground md:hidden">
           Status (agent says){" "}
         </span>
         <StatusCell agent={agent} />
       </TableCell>
-      <TableCell className="min-w-0 whitespace-normal px-4 md:min-w-44 max-md:col-span-2 max-md:row-start-4 max-md:p-0 max-md:pl-4">
+      <TableCell className="min-w-0 whitespace-normal px-4 md:min-w-40 max-md:col-span-2 max-md:row-start-4 max-md:p-0 max-md:pl-4">
         <span aria-hidden="true" className="text-muted-foreground md:hidden">
           Machine{" "}
         </span>
@@ -98,7 +91,7 @@ export function AgentRow({
           muted={muted}
         />
       </TableCell>
-      <TableCell className="px-4 text-muted-foreground md:min-w-24 max-md:col-start-2 max-md:row-start-2 max-md:p-0 max-md:text-right">
+      <TableCell className="whitespace-nowrap px-4 text-muted-foreground md:min-w-24 max-md:col-start-2 max-md:row-start-2 max-md:p-0 max-md:text-right">
         {updated(agent.updatedAt)}
       </TableCell>
     </TableRow>

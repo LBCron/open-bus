@@ -21,6 +21,7 @@ import { appOrigin } from "../http/errors.js";
 import { clientIp, clientKey, enforceRateLimit } from "../http/rate-limit.js";
 import { hub } from "../hub/stub.js";
 import { b64urlEncode } from "../util/crypto.js";
+import { approveCsp } from "./approve.js";
 import {
   esc,
   type PageBase,
@@ -29,7 +30,11 @@ import {
   shell,
 } from "./approve-page.js";
 import { HTML_CSP } from "./auth.js";
-import { renderLinkConfirm, renderLinkError } from "./link-page.js";
+import {
+  linkSwitchUrl,
+  renderLinkConfirm,
+  renderLinkError,
+} from "./link-page.js";
 import type { AppType } from "./types.js";
 
 const STATE = /^[A-Za-z0-9_-]{16,128}$/;
@@ -167,10 +172,12 @@ export function mountLink(app: AppType): void {
       aud: req.aud,
       action: R.linkConfirm,
       csrf: await linkCsrf(c.env, link, c.get("session")),
+      switchUrl: linkSwitchUrl(c.env),
     });
+    // approveCsp: "Not you?" posts to logout, whose redirects reach Access.
     // aud is a canonical origin (parseOrigin): no CSP metacharacters.
     return html(page, 200, {
-      csp: HTML_CSP.replace(
+      csp: approveCsp(c.env).replace(
         "form-action 'self'",
         `form-action 'self' ${req.aud}`,
       ),

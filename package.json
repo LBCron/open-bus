@@ -2,7 +2,7 @@
   "name": "open-bus",
   "private": true,
   "type": "module",
-  "version": "0.61.1",
+  "version": "0.63.0",
   "packageManager": "pnpm@10.11.1",
   "engines": {
     "node": ">=22"

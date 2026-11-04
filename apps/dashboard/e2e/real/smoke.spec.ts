@@ -1,10 +1,6 @@
 // Read-only smoke against a real Worker (local `wrangler dev` or staging).
 // Mutates nothing: no revoke, no approve. Safe on staging.
-import {
-  LinkedAppsResponseSchema,
-  MeSchema,
-  RolesResponseSchema,
-} from "@ob/shared";
+import { LinkedAppsResponseSchema, MeSchema } from "@ob/shared";
 import { expect, test, watchErrors } from "./fixtures";
 
 test("the owner is signed in: /api/v1/me answers 200 with the owner email", async ({
@@ -79,41 +75,12 @@ test("Machines shows its heading and either the empty state or rows; Agents show
     )
   )
     await expect(
-      page.getByRole("columnheader", { name: /Status \(agent says\)/ }).first(),
+      page.getByRole("columnheader", { name: /Status.*agent says/ }).first(),
     ).toBeVisible();
   // Still live after a settle window: a drop right after hello would show here.
   await page.waitForTimeout(1_500);
   await expect(page.getByText("Live updates paused.")).toHaveCount(0);
 
-  expect(errors, "console errors and CSP violations").toEqual([]);
-});
-
-test("GET /api/v1/roles answers 200 with { roles: [...] }", async ({
-  signedIn: page,
-}) => {
-  const res = await page.request.get("/api/v1/roles");
-  expect(res.status()).toBe(200);
-  RolesResponseSchema.parse(await res.json());
-});
-
-test("Roles shows its heading and either the empty state or a table, with no console errors", async ({
-  signedIn: page,
-}) => {
-  const errors = watchErrors(page);
-  // Client-side nav: the local dev:e2e server has no SPA fallback for deep links.
-  await page.goto("/");
-  await page
-    .getByRole("navigation", { name: "Main" })
-    .getByRole("link", { name: /^Roles\b/ })
-    .click();
-  await expect(
-    page.getByRole("heading", { name: "Roles", exact: true, level: 1 }),
-  ).toBeVisible();
-  const empty = page.getByText("No roles yet");
-  const table = page.getByRole("table");
-  await expect(empty.or(table.first())).toBeVisible();
-  await expect(page.getByText("Couldn't load roles")).toHaveCount(0);
-  await page.waitForTimeout(1_000);
   expect(errors, "console errors and CSP violations").toEqual([]);
 });
 

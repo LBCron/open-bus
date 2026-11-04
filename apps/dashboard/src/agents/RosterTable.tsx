@@ -3,14 +3,20 @@ import type { Agent } from "../api/contract";
 import { TableFrame } from "../ui/TableFrame";
 import { AgentRow } from "./AgentRow";
 
-const HEADS = [
-  "Agent",
-  "Kind",
-  "Status (agent says)",
-  "Machine",
-  "Reachable",
-  "Updated",
-];
+/** The header carries "agent says" once, as a dashed tag (like StatusCell's pill). */
+const STATUS_HEAD = (
+  <>
+    Status<span className="sr-only">,</span>{" "}
+    <span
+      data-agent-says-tag
+      className="ml-1 rounded-sm border border-dashed border-input px-1 py-px text-[11px] font-normal tracking-normal normal-case"
+    >
+      agent says
+    </span>
+  </>
+);
+
+const HEADS = ["Agent", "Kind", STATUS_HEAD, "Machine", "Reachable", "Updated"];
 
 /** One roster table; when the filter hides every row it says so in place. */
 export function RosterTable({
