@@ -51,6 +51,7 @@ describe("contract is pinned", () => {
       "fetch",
       "status",
       "card_request",
+      "rename",
     ]);
     expect(SERVER_FRAMES).toEqual([
       "hello_ok",
@@ -64,6 +65,7 @@ describe("contract is pinned", () => {
       "roster_changed",
       "card",
       "card_refused",
+      "renamed",
     ]);
   });
 
@@ -141,6 +143,16 @@ describe("contract is pinned", () => {
   });
 });
 
+describe("renames (#393) are pinned", () => {
+  it("pins the gate, the limits and the message", () => {
+    expect(shared.RENAME_MIN_CLIENT).toBe("0.64.0");
+    expect(shared.LIMITS.formerNameGraceMs).toBe(3_600_000);
+    expect(shared.LIMITS.maxFormerNames).toBe(5);
+    expect(shared.LIMITS.renamesPerHour).toBe(10);
+    expect(shared.RENAME_MESSAGES.rate).toBe("Too many renames");
+  });
+});
+
 describe("CONTRACT.md", () => {
   it("lists every refusal reason as a standalone token", () => {
     for (const t of REFUSAL_REASONS) expect(doc, t).toContain(`\`${t}\``);
@@ -154,6 +166,11 @@ describe("CONTRACT.md", () => {
       "recipient_closed",
       "AGENT_CARD_MIN_CLIENT",
       "0.55.0",
+      "RENAME_MIN_CLIENT",
+      "0.64.0",
+      "former_names",
+      "name_kind",
+      "Too many renames",
       "ob-card+jwt",
       "ob-link+jwt",
       "TEST_CARD_JWK",

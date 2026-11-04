@@ -3,6 +3,7 @@ import {
   AgentKindSchema,
   AgentRefSchema,
   BusNameSchema,
+  FormerNamesSchema,
   IsoTimeSchema,
   KindTokenSchema,
   MachineLabelSchema,
@@ -234,6 +235,8 @@ export const AgentInfo = z.object({
   status: StatusStateSchema.optional(),
   status_label: StatusLabelSchema.optional(),
   status_at: IsoTimeSchema.optional(),
+  /** Names the agent left that still reach it, newest first (#393). Only to clients at or above RENAME_MIN_CLIENT. */
+  former_names: FormerNamesSchema.optional(),
 });
 
 export const Welcome = z.object({
