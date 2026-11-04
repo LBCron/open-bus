@@ -351,6 +351,77 @@ version constant:
 - Old hubs: generalize `ompAsPi` to any kind the hub refuses, so codex
   registers as `pi` there.
 
+## 5. The thread's name (R393e), 2026-11-04
+
+**Question.** Does Codex record a name for a live thread that an adapter can
+read, so a `/rename` on the Codex side is a rename on the bus?
+
+**Method.** `@openai/codex` 0.166.0 (npm, into a scratch prefix), every run in
+a temp `CODEX_HOME`, no credentials and no network. Over stdio `app-server`:
+`initialize`, `thread/start`, `thread/name/set`. The db was then read with
+`node:sqlite` from a second process while that app-server still held it, and
+once more after it exited. Nothing under the real `~/.codex` was opened, and
+the real `~/.codex` on this box has no state db at all (its CLI is 0.47.0).
+
+**Where the name lives.** `$CODEX_HOME/state_5.sqlite`, table `threads`, column
+`name TEXT` (nullable). 0.166 creates the table with ~45 columns; the ones that
+matter here are `id`, `name`, `title`, `rollout_path`, `source`, `cwd`,
+`archived`. `thread/name/set {threadId, name}` answers `{}` and the row's `name`
+becomes that value, while `title` stays empty — so `name` is the rename, and
+`title` is the auto-derived one. `/rename` in the TUI and the app sends the
+same method. A thread that was never renamed has `name` NULL.
+
+**Its WAL.** `PRAGMA journal_mode` is `wal`; `state_5.sqlite-wal` (2.2 MB on a
+fresh home) and `-shm` exist while Codex runs. A `readOnly: true` open sees a
+rename at once, with no checkpoint and no sleep, and still sees it after Codex
+exits (the WAL is not truncated on the way out). `?immutable=1` fails outright
+with `no such table: threads`: the schema itself is only in the WAL. So a
+read-only open is the right call, which is what the daemon's `threadRow`
+already does for attestation.
+
+**`node:sqlite` on the pinned Node.** `.nvmrc` is `22`, and CI resolves the
+newest 22.x. Node 22.21.0 here has `DatabaseSync` and `StatementSync` (SQLite
+3.50.4) behind `process.getBuiltinModule("node:sqlite")`, which is undefined on
+an older Node rather than a throw. Loading it prints "SQLite is an experimental
+feature" on stderr; MCP's channel is stdout, so that is only noise.
+
+**Every miss, measured.** Each leaves the name `codex` and throws nothing:
+
+| State | What SQLite says |
+| --- | --- |
+| db held EXCLUSIVE by another connection (rollback journal) | `database is locked` (errcode 5, `SQLITE_BUSY`) |
+| folder not writable, so no `-shm` can be attached | `attempt to write a readonly database` |
+| no `state_5.sqlite`, or only a `state_4.sqlite` | `ERR_SQLITE_ERROR` |
+| no `threads` table, or no `name` column | `ERR_SQLITE_ERROR` |
+| `state_5.sqlite` is not a database, or is a directory | `ERR_SQLITE_ERROR` |
+| `name` is NULL, empty, or whitespace | no name |
+| no row for the thread id | no name |
+
+WAL does **not** reproduce the locked case: a reader goes through even while a
+writer holds `BEGIN EXCLUSIVE` in WAL mode. So `database is locked` needs a
+rollback-journal or hot-journal state, and the adapter's busy timeout is what
+makes it a miss instead of a stalled tool call.
+
+**`CODEX_HOME` does not arrive by itself.** Codex filters the MCP server's env
+(§1), so a custom `CODEX_HOME` reaches the adapter only through the entry's
+`env` table, which the installer writes (C26e). Without it the adapter reads
+`~/.codex`, misses, and the name stays `codex`.
+
+**What the adapter does.** Reads `threads.name` for its own thread on every
+`tools/call` (Codex hellos are per call, so a rename is an edge at the next
+call), read-only, never creating or writing the db, with a 200 ms busy timeout,
+and sends it as the hello's `proposed_name` clipped to the wire's 64 chars.
+Nothing else in the row is read; the attestation read stays the daemon's.
+
+**Not observed here:** a live `/rename` typed into the TUI or the desktop app
+(only the `thread/name/set` both send), the app's bundled 0.155 alpha, and the
+0.165 CLI's own db — the probed one is 0.166.
+
+**Residual.** `state_5` is a versioned filename: a later `state_6` is a miss,
+not a wrong name, and the adapter would need that row added. The name is a copy
+in a db any same-user process can write, the same limit attestation has; and
+the name is a hint the hub re-slugs, never an identity.
+
 ## Open decisions (user)
 
 1. **Attestation strength.** Ship with check 3 (rollout `call_id`), or accept
