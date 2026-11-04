@@ -29,6 +29,12 @@ While the label is on:
   have passed by then, so the check alone wouldn't stop it.
 - The failing `release-hold` check doesn't open a `blocker` issue: a held
   release isn't a stuck one.
+- In the queue the check reads only the PR its entry names. That's enough
+  while the queue's grouping is `ALLGREEN`, where each entry's own checks
+  must pass. If the queue moves to `HEADGREEN`, a held release batched ahead
+  of another PR could merge on that PR's green run, so revisit this check.
+- If the `dequeue` job fails (its run shows an error), remove the release PR
+  from the merge queue in GitHub by hand.
 
 Remove the label to release. The `release-hold` check re-runs and passes, and
 the next cadence run (every 15 minutes, or after CI) arms the PR as usual:

@@ -10,12 +10,14 @@ on:
     types: [opened, synchronize, reopened, labeled, unlabeled]
   merge_group:
 permissions: {}
-concurrency:
-  group: release-hold-${{ github.ref }}
-  cancel-in-progress: true
 jobs:
   release-hold:
     runs-on: ubuntu-latest
+    # Only the check cancels its stale runs. `dequeue` must never be cancelled
+    # by a later event on the PR, or a hold added while queued is lost.
+    concurrency:
+      group: release-hold-${{ github.ref }}
+      cancel-in-progress: true
     permissions:
       pull-requests: read
     steps:

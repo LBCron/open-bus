@@ -169,7 +169,14 @@ describe("release-hold.yml", () => {
     expect(job.name ?? "release-hold").toBe("release-hold");
     expect(job.permissions).toEqual({ "pull-requests": "read" });
     expect(JSON.stringify(job)).toContain("scripts/ci/release-hold.ts check");
+    // Nothing may cancel dequeue: no workflow-level concurrency, none on it.
+    expect(w.concurrency).toBeUndefined();
+    expect(job.concurrency["cancel-in-progress"]).toBe(true);
+    expect(job.if).toBeUndefined();
+    expect(w.on.pull_request.paths).toBeUndefined();
+    expect(w.on.pull_request.branches).toBeUndefined();
     const dq = w.jobs.dequeue;
+    expect(dq.concurrency).toBeUndefined();
     expect(String(dq.if)).toContain("labeled");
     expect(JSON.stringify(dq)).toContain("scripts/ci/release-hold.ts dequeue");
   });
