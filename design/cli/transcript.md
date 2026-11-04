@@ -791,7 +791,8 @@ the last block with: ✓  Revoked leo-macbook-pro on the bus -->
 Global comes only from this list, which is kept per user on this machine in
 ~/.openbus/global.json. A repo's `.openbus.json` can't make an agent global,
 because anyone who can write to a repo could otherwise widen what its agents
-see. `add` stores the absolute path; a directory's subdirectories are included.
+see. `add` stores the absolute path; only that directory is global, not its
+subdirectories.
 
 `npx @open-bus/cli global add ~/code/ops`. Exit code 0:
 
@@ -799,6 +800,7 @@ see. `add` stores the absolute path; a directory's subdirectories are included.
 open-bus 0.1.0
 
 [[success]]✓[[/success]]  ~/code/ops is now global. Agents started there see every namespace.
+[[muted]]   Only that directory: its subdirectories are not global.[[/muted]]
 [[muted]]   Sessions already running there change when they restart.[[/muted]]
 ```
 

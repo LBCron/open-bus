@@ -57,15 +57,6 @@ export const R = {
   login: AUTH.login,
   /** Server-side redirect target once a device code is approved. */
   dashboard: "/",
-  /** Owner session; PUT/DELETE `R.role(ns, role)` with CSRF. */
-  roles: "/api/v1/roles",
-  role: (namespace: string, role: string) => {
-    if (!WireNamespaceSchema.safeParse(namespace).success)
-      throw new RangeError("R.role: invalid namespace");
-    if (!BusNameSchema.safeParse(role).success)
-      throw new RangeError("R.role: invalid role");
-    return `/api/v1/roles/${seg(namespace)}/${seg(role)}`;
-  },
   linkedApps: "/api/v1/linked-apps",
   linkedApp: (aud: string) => {
     if (!OriginSchema.safeParse(aud).success)
@@ -135,7 +126,7 @@ export const AgentSchema = z.strictObject({
    */
   state: z.enum(["live", "queued"]),
   updatedAt: ISO,
-  /** Owner-assigned role, if any. */
+  /** @deprecated never sent since #394; removal tracked in #396 */
   role: BusNameSchema.optional(),
   /** Self-reported ("agent says"); cleared on close. */
   status: StatusStateSchema.optional(),
@@ -148,20 +139,6 @@ export const AgentsResponseSchema = z.strictObject({
   agents: z.array(AgentSchema).max(LIMITS.maxRosterAgents),
 });
 export type AgentsResponse = z.infer<typeof AgentsResponseSchema>;
-/** A role points at an agent, or is vacant (`agentId: null`). */
-export const RoleSchema = z.strictObject({
-  namespace: WireNamespaceSchema,
-  role: BusNameSchema,
-  agentId: IdSchema.nullable(),
-  setAt: ISO,
-});
-export type Role = z.infer<typeof RoleSchema>;
-export const RolesResponseSchema = z.strictObject({
-  roles: z.array(RoleSchema).max(LIMITS.maxRoles),
-});
-export type RolesResponse = z.infer<typeof RolesResponseSchema>;
-export const PutRoleBodySchema = z.strictObject({ agentId: IdSchema });
-
 export const LinkedAppSchema = z.strictObject({
   aud: OriginSchema,
   linkedAt: ISO,

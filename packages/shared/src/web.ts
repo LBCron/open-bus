@@ -53,12 +53,7 @@ export {
   MachinesResponseSchema,
   type Me,
   MeSchema,
-  PutRoleBodySchema,
   R,
-  type Role,
-  RoleSchema,
-  type RolesResponse,
-  RolesResponseSchema,
   SESSION_EXP_HEADER,
   SESSION_GEN_HEADER,
 } from "./rest.js";

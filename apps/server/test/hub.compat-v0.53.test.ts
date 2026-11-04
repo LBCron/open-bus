@@ -1,7 +1,7 @@
 // AC2a (Review Focus 3): a published 0.53.0 daemon's roster and receipt
-// decoders, frozen at the last commit before AC1 (3f921a0). A hub with roles,
-// a role holder, a vacant role and agents with status (AC3) must still hand
-// it frames it decodes.
+// decoders, frozen at the last commit before AC1 (3f921a0). A hub with agents
+// with status (AC3) must still hand it frames it decodes; roles are gone
+// (#394), so a former role name is unknown_agent.
 import {
   AGENT_CARD_MIN_CLIENT,
   BusNameSchema,
@@ -15,7 +15,6 @@ import {
 } from "@ob/shared";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { setRole } from "../src/hub/roles.js";
 import {
   type Daemon,
   daemon,
@@ -130,25 +129,17 @@ const decodes = (schema: z.ZodType, raw: unknown) => {
   expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
 };
 
-describe("a 0.53.0 daemon's decoders on a hub with roles", () => {
+describe("a 0.53.0 daemon's decoders on a hub with statuses", () => {
   it("the gate is above 0.53.0", () => {
     expect(semverGte("0.53.0", AGENT_CARD_MIN_CLIENT)).toBe(false);
   });
 
-  it("decodes the roster, a role send's receipt and a vacant-role refusal", async () => {
+  it("decodes the roster, a send's receipt and an unknown-name refusal", async () => {
     const host = await at(AGENT_CARD_MIN_CLIENT);
     const old = await at("0.53.0");
     try {
       const a = ns("c53");
-      const set = async (role: string, agent: string) =>
-        expect(
-          await inOwnerHub((s) =>
-            setRole(s.storage.sql, a, role, agent, Date.now()),
-          ),
-        ).toBe("ok");
-      await set("lane-6", await register(host, "r-h", "Holder", a));
-      await set("lane-7", await register(host, "r-c", "Closer", a));
-      host.send({ v: 1, id: id("d"), type: "agent_down", agent_ref: "r-c" });
+      await register(host, "r-h", "Holder", a);
       await register(old, "r-o", "Oldie", a);
       // AC3: statuses set on both a gated agent and the old daemon's own.
       host.send({
@@ -177,7 +168,7 @@ describe("a 0.53.0 daemon's decoders on a hub with roles", () => {
         id: sid,
         type: "send",
         from_ref: "r-o",
-        to_name: "lane-6",
+        to_name: "Holder",
         body: "hi",
       });
       decodes(V053Receipt, await rawReply(old, "receipt", sid));
@@ -191,9 +182,9 @@ describe("a 0.53.0 daemon's decoders on a hub with roles", () => {
         to_name: "lane-7",
         body: "hi",
       });
-      const vacant = await rawReply(old, "receipt", vid);
-      decodes(V053Receipt, vacant);
-      expect(vacant).toMatchObject({
+      const unknown = await rawReply(old, "receipt", vid);
+      decodes(V053Receipt, unknown);
+      expect(unknown).toMatchObject({
         state: "refused",
         reason: "unknown_agent",
       });
@@ -212,6 +203,8 @@ describe("a 0.53.0 daemon's decoders on a hub with roles", () => {
           expect.objectContaining({ bus_name: "Oldie", status: "idle" }),
         ]),
       );
+      for (const row of gatedRoster.agents)
+        expect(row).not.toHaveProperty("role");
     } finally {
       for (const d of [host, old])
         try {

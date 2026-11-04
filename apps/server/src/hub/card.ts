@@ -6,7 +6,7 @@
  * (not_linked), then, asynchronously, the keys (null: `error internal`).
  * A not_linked refusal counts against the limit and a full window answers
  * rate_limited for any aud, so linked apps cannot be probed at speed. Every
- * synchronous step, including the count and the claims snapshot (role,
+ * synchronous step, including the count and the claims snapshot (name,
  * applied status), runs before the first await; do.ts re-checks the link,
  * the agent and the snapshot after it (stillTrue).
  */
@@ -26,7 +26,6 @@ import { parseOrigin } from "../card/origin.js";
 import type { Env } from "../env.js";
 import { logEvent } from "../util/log.js";
 import { isLinked } from "./linked-apps.js";
-import { rolesOf } from "./roles.js";
 import type { AgentRow } from "./rows.js";
 import { statusFields } from "./status.js";
 
@@ -93,13 +92,11 @@ function windowFull(sql: SqlStorage, agentId: string, now: number): boolean {
   );
 }
 
-/** What a card says about the agent beyond its id: name, role, applied status. */
-function snapshot(sql: SqlStorage, agent: AgentRow) {
-  const role = rolesOf(sql, [agent.id], null).get(agent.id);
+/** What a card says about the agent beyond its id: name, applied status. */
+function snapshot(agent: AgentRow) {
   const st = statusFields(agent);
   return {
     name: agent.name,
-    ...(role === undefined ? {} : { role }),
     ...(st.status === undefined
       ? {}
       : {
@@ -114,14 +111,10 @@ function snapshot(sql: SqlStorage, agent: AgentRow) {
 /**
  * After the signing await: the agent (null when no longer open) still says
  * what the card says. A close and reopen that changed none of it (same id,
- * name, role and status) is indistinguishable and the card is still true.
+ * name and status) is indistinguishable and the card is still true.
  */
-export function stillTrue(
-  sql: SqlStorage,
-  agent: AgentRow | null,
-  snap: string,
-): boolean {
-  return agent !== null && JSON.stringify(snapshot(sql, agent)) === snap;
+export function stillTrue(agent: AgentRow | null, snap: string): boolean {
+  return agent !== null && JSON.stringify(snapshot(agent)) === snap;
 }
 
 const b64url = (b: Uint8Array): string =>
@@ -152,7 +145,7 @@ export function issueCard(
     return { code: "not_linked" };
 
   const iat = Math.floor(now / 1000);
-  const about = snapshot(sql, agent);
+  const about = snapshot(agent);
   const claims: Omit<CardClaims, "owner"> = {
     iss: `https://${env.APP_HOST}`,
     aud: f.aud,

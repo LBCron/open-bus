@@ -158,20 +158,6 @@ create table if not exists send_keys (
 create index if not exists send_keys_agent on send_keys(from_agent);
 create index if not exists send_keys_due on send_keys(created_at);
 
--- AC2a: owner-assigned roles (hub/roles.ts). lrole = lower(role), so a role
--- compares case-insensitively as names do; agent_id null is a vacant role.
-create table if not exists roles (
-  org_id text not null,
-  namespace text not null,
-  role text not null,
-  lrole text not null,
-  agent_id text,
-  set_at integer not null,
-  primary key (org_id, namespace, lrole)
-);
-create index if not exists roles_agent on roles(agent_id);
-create index if not exists roles_lrole on roles(org_id, lrole);
-
 -- AC4b: apps the owner linked through /link (hub/linked-apps.ts).
 create table if not exists linked_apps (
   org_id text not null,
@@ -332,6 +318,12 @@ export function migrateHub(sql: SqlStorage, now: number = Date.now()): void {
   }
   sql.exec(HUB_SCHEMA_B14_INDEXES);
   sql.exec(HUB_SCHEMA_PURGE_INDEXES);
+  // #394: roles were removed; a hub created before drops their table.
+  sql.exec(`
+drop index if exists roles_agent;
+drop index if exists roles_lrole;
+drop table if exists roles;
+`);
 }
 
 /**
