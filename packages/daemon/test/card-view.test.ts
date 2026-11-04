@@ -1,4 +1,4 @@
-// AC5c: the self tool's role and status, and `open-bus status` rows, from the hub roster.
+// AC5c: the self tool's status, and `open-bus status` rows, from the hub roster.
 import { connect } from "node:net";
 import { daemonStatus, LineDecoder } from "@ob/ipc";
 import { AGENT_CARD_MIN_CLIENT } from "@ob/shared";
@@ -61,7 +61,7 @@ async function bus(name: string, silent = false, server_version = GATE) {
 }
 
 describe("self with card (AC5c)", () => {
-  it("at the gate: the agent's own row's role and status, from one hub list", async () => {
+  it("at the gate: the agent's own row's status, from one hub list", async () => {
     const h = await bus("A");
     const a = await h.adapter("A", { client_version: GATE });
     const before = h.of("list").length;
@@ -71,13 +71,14 @@ describe("self with card (AC5c)", () => {
       agent: {
         name: "A",
         namespace: "ns",
-        role: "lane-6",
         status: "working",
         status_label: "writing tests",
         status_at: AT,
       },
       daemon_version: GATE,
     });
+    // The hub's row carries an old hub's `role`; it is dropped.
+    expect(r.type === "agent" && r.agent).not.toHaveProperty("role");
     expect(h.of("list").slice(before)).toEqual([
       expect.objectContaining({ from_ref: "A" }),
     ]);
@@ -147,19 +148,25 @@ describe("status rows (AC5c)", () => {
   const rowsOf = (st: unknown) =>
     (st as { namespaces: { agents: object[] }[] }).namespaces[0]?.agents;
 
-  it("at the gate, carry the role and status", async () => {
+  it("at the gate, carry the status and not an old hub's role", async () => {
     const h = await bus("A");
     await h.adapter("A", { client_version: GATE });
     expect(rowsOf(await status(h.socketPath, GATE))).toEqual([
-      expect.objectContaining({ name: "other", role: "lane-7" }),
+      expect.objectContaining({ name: "other" }),
       expect.objectContaining({
         name: "A",
-        role: "lane-6",
         status: "working",
         status_label: "writing tests",
         status_at: AT,
       }),
     ]);
+  });
+
+  it("at the gate, show nothing role-related", async () => {
+    const h = await bus("A");
+    await h.adapter("A", { client_version: GATE });
+    for (const row of rowsOf(await status(h.socketPath, GATE)) ?? [])
+      expect(row).not.toHaveProperty("role");
   });
 
   it("below the gate, carry none of them", async () => {

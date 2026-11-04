@@ -60,11 +60,6 @@ const refusals: Record<
       `That name exists in ${n && n > 1 ? `${n} namespaces` : "more than one namespace"}.`,
     "Send again with to_namespace set to one of them.",
   ],
-  // A send to a role no one holds; `to` is the role.
-  role_vacant: [
-    (_n, to) => `No one holds ${to ?? "that role"} right now.`,
-    "Ask the user to point it at an agent, or message an agent by name.",
-  ],
 };
 
 /**
@@ -84,21 +79,17 @@ const quoted = (head: string, quote: string, tail: string): string => {
 /**
  * A receipt as an agent reads it: design/cli/transcript.md "Receipts",
  * verbatim, uncoloured (the glyph carries the state). `namespaces` is how many
- * namespaces hold `to`, for `ambiguous`. A `to_name` (a send to a role) shows
- * as "code-96 (lane-6)". `excerpt` (from `excerptOf`) is the
+ * namespaces hold `to`, for `ambiguous`. `excerpt` (from `excerptOf`) is the
  * message an expired or refused notice is about; without it the quote is left
  * out.
  */
 export function receiptText(
-  r: { state: ReceiptState; reason?: ReceiptReason; to_name?: string },
-  sentTo: string,
+  r: { state: ReceiptState; reason?: ReceiptReason },
+  to: string,
   namespaces?: number,
   excerpt?: string,
 ): string {
   const quote = excerpt ? `"${excerpt}"` : undefined;
-  // A send to a role names its holder, then the role (AC5c).
-  const holder = r.to_name === undefined ? undefined : displayName(r.to_name);
-  const to = holder && holder !== sentTo ? `${holder} (${sentTo})` : sentTo;
   switch (r.state) {
     case "pending":
       return fitLine(
@@ -117,8 +108,12 @@ export function receiptText(
       return fitLine((v) => quoted(head(v), quote, tail(v)), to);
     }
     case "refused": {
-      const copy = r.reason ? refusals[r.reason] : undefined;
-      const label = r.reason ? `Refused (${r.reason})` : "Refused";
+      // A `role_vacant` from a pre-#394 hub is not in the reason list any more
+      // (#394). It reaches here from a replayed outcome, a `receipt_update`, or
+      // a daemon still running the old remap, so normalise it here too.
+      const reason = r.reason === "role_vacant" ? "unknown_agent" : r.reason;
+      const copy = reason ? refusals[reason] : undefined;
+      const label = reason ? `Refused (${reason})` : "Refused";
       const [detail, hint] = copy ?? [null, "Message another agent."];
       const said = (v: string) =>
         typeof detail === "function" ? detail(namespaces, v) : detail;
@@ -346,23 +341,6 @@ export const statusSetText = (state: string, label?: string): string =>
 export const earlierStatusText = (message: string): string =>
   `Your previous status did not reach the user. ${message}`;
 
-/** The most characters a role or a resolved holder's name shows: BusNameSchema's cap. */
-const NAME_CHARS = LIMITS.maxBusNameChars;
-
-/**
- * A hub-supplied name (a role, a receipt's `to_name`) as it is shown: like a
- * kind, controls and invisibles stripped, whitespace folded, capped.
- */
-const displayName = (name: string): string =>
-  [
-    ...stripTerminalControls(String(name))
-      .replace(INVISIBLES, "")
-      .replace(/\s+/g, " ")
-      .trim(),
-  ]
-    .slice(0, NAME_CHARS)
-    .join("");
-
 /** A status at least this old says how old it is (AC5c; Design-approved). */
 export const STATUS_STALE_MS = 10 * 60_000;
 
@@ -377,16 +355,9 @@ const agoText = (ms: number): string => {
 
 /** The card fields a roster, self or status row may carry (AC5c); the hub supplies them. */
 export type CardFields = {
-  role?: unknown;
   status?: unknown;
   status_label?: unknown;
   status_at?: unknown;
-};
-
-/** A row's role as shown, or undefined when it has none. */
-export const displayRole = (row: CardFields): string | undefined => {
-  const role = typeof row.role === "string" ? displayName(row.role) : undefined;
-  return role || undefined;
 };
 
 /** A hub-supplied status label as shown: cleaned, capped at 64, and no `"` to break the quoting. */
@@ -420,8 +391,7 @@ export function statusSaysText(
 }
 
 /**
- * One `list_agents` line (AC5c): a role holder as `lane-6 → code-96`,
- * then the status after two spaces.
+ * One `list_agents` line (AC5c): the name, then the status after two spaces.
  */
 export function rosterLine(
   a: CardFields & {
@@ -433,19 +403,19 @@ export function rosterLine(
   },
   now = Date.now(),
 ): string {
-  const role = displayRole(a);
   const says = statusSaysText(a, now);
-  return `- ${role ? `${role} → ` : ""}${a.name} (${displayKind(a.kind)}, ${a.namespace}${typeof a.machine_label === "string" && a.machine_label ? `, ${a.machine_label}` : ""})${a.queued ? " (queued)" : ""}${says ? `  ${says}` : ""}`;
+  return `- ${a.name} (${displayKind(a.kind)}, ${a.namespace}${typeof a.machine_label === "string" && a.machine_label ? `, ${a.machine_label}` : ""})${a.queued ? " (queued)" : ""}${says ? `  ${says}` : ""}`;
 }
 
 /**
  * The `self` result (AC5c): the agent entry, its hub-supplied card fields
- * cleaned as list_agents shows them, then the role in words (AC5c; Design-approved).
+ * cleaned as list_agents shows them.
  */
 export function selfText(
   agent: (CardFields & Record<string, unknown>) | null,
 ): string {
   if (!agent) return JSON.stringify(agent, null, 2);
+  // A `role` from an old hub is dropped with the card fields.
   const {
     role: _r,
     status: _s,
@@ -453,14 +423,12 @@ export function selfText(
     status_at: _a,
     ...rest
   } = agent;
-  const role = displayRole(agent);
   const label =
     typeof agent.status_label === "string"
       ? displayLabel(agent.status_label)
       : "";
   const shown = {
     ...rest,
-    ...(role ? { role } : {}),
     ...(typeof agent.status === "string"
       ? { status: displayKind(agent.status) }
       : {}),
@@ -470,8 +438,5 @@ export function selfText(
       ? { status_at: agent.status_at }
       : {}),
   };
-  const json = JSON.stringify(shown, null, 2);
-  return role
-    ? `${json}\n\nYou hold the role ${role}: the user pointed it at you, so messages sent to ${role} reach you.`
-    : json;
+  return JSON.stringify(shown, null, 2);
 }
