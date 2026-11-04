@@ -56,7 +56,11 @@ export const receiptShape = {
   msg_id: MsgIdSchema,
   state: ReceiptStateSchema,
   reason: ReceiptReasonSchema.optional(),
-  /** The resolved recipient's bus name (a send to a role names its holder). Gated by AGENT_CARD_MIN_CLIENT. */
+  /**
+   * The resolved recipient's bus name when it differs from the name sent to:
+   * a role's holder (gated by AGENT_CARD_MIN_CLIENT) or, for a former name,
+   * the agent's current name (gated by RENAME_MIN_CLIENT, #393).
+   */
   to_name: BusNameSchema.optional(),
 } as const;
 

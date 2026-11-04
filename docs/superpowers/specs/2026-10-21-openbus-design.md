@@ -28,7 +28,8 @@ It extends agent-bus (`~/code/projects/agent-bus`), which works only on a single
 ## Anti-goals (failures even if it "works")
 
 - Two sessions sharing an identity, or seeing each other's mail or replies. This is the lesson from agent-bus's OpenCode v2 work.
-- A sender choosing its own name through tool arguments (agent-bus #156). Identity always comes from what the harness and daemon attest.
+- A sender naming itself per message through tool arguments (agent-bus #156). The sender of a message is always the agent the daemon attests, never a field the sender fills in.
+  - **Reversed for the bus name (#393, approved by the user on 2026-11-04):** this line used to forbid any sender choosing its own name through tool arguments. An agent may now choose its own bus name with the `rename` tool. The daemon sends the rename for its own attested agent, the hub de-collides the name, and the agent's former name keeps reaching it for 1 h (see "Names are unique per namespace").
 - Waking a closed OpenCode session and spending tokens.
 - A receipt that says "delivered" when the message wasn't.
 - Treating a message from another agent as the user's consent to act.
@@ -87,6 +88,11 @@ Names are unique per namespace. **[call]**
 - The hub owns the bus name. If the name a harness proposes (Claude's session name, or an OpenCode or Pi `register`) is taken, the hub assigns `<name>-2`, `-3` and so on, as agent-bus does. The agent learns its bus name from `self`. Inbound frames show the sender's bus name, so replies route by bus name.
 - A closed session's name is freed, and reclaimed when the session reopens if still free.
 - Address-shaped names are rejected.
+- **Renames (#393) [user]:** an agent's bus name follows its harness's rename (Claude `/rename`, an OpenCode title, a Pi or omp session name, a Codex thread name), and an agent can also choose a name with the `rename` tool. The latest of the two wins. The plan is Task R393 in `plans/2026-10-21-openbus/05-client.md`, and the wire is in `packages/shared/CONTRACT.md` ("Renames").
+  - A former name keeps reaching the agent for 1 h, the mail TTL. A chosen former name is also reserved for that hour, so nobody else can take it and receive mail meant for the renamed agent.
+  - A harness's default name (such as `pi`) gets a unique suffix that is never reused, such as `pi-4f2a`, so it needs no reservation. It still reaches the renamed agent for the 1 h grace.
+  - Resolution checks the sender's own namespace first, current names and then former names, before any other namespace.
+  - Each agent can change its name at most 10 times an hour.
 
 Queue or refuse **[call]**:
 - If the recipient is registered and the daemon last reported it open, but its machine is disconnected, the message is **queued** (1 h).
