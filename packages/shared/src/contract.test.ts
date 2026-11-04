@@ -150,6 +150,7 @@ describe("renames (#393) are pinned", () => {
     expect(shared.LIMITS.maxFormerNames).toBe(5);
     expect(shared.LIMITS.renamesPerHour).toBe(10);
     expect(shared.RENAME_MESSAGES.rate).toBe("Too many renames");
+    expect(shared.RENAME_MESSAGES.room).toBe("Too many recent names");
   });
 });
 
@@ -171,6 +172,7 @@ describe("CONTRACT.md", () => {
       "former_names",
       "name_kind",
       "Too many renames",
+      "Too many recent names",
       "ob-card+jwt",
       "ob-link+jwt",
       "TEST_CARD_JWK",
