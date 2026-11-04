@@ -4566,3 +4566,188 @@ Ruling: one hello per exec. A second OpenBus call inside the same `exec` is
 refused, and the refusal tells the agent to make each OpenBus call in its own
 `exec`. Why: it keeps today's strength, a single use per model-written item.
 If that's wrong, agents that batch calls see a retryable refusal.
+
+## Task R393: Agents follow renames (#393, agent-bus parity)
+
+Scope (approved): follow harness renames live; a `rename` tool; former names
+resolve for a grace period. Dashboard rename is a follow-up. Lands after #394
+(roles removed), so nothing below touches roles.
+
+**Decided by the user, 2026-11-04** (recorded on #399; the spec is already
+updated in Backend's #416, which is where the naming rules below now live,
+under "Names are unique per namespace"):
+
+1. A former name stays reserved for its grace. Yes.
+2. A tool rename also renames the Pi/omp session. Yes.
+3. The grace is 1 h. Yes.
+4. A harness's **default** name gets a unique, never-reused suffix (`pi-4f2a`)
+   and needs no reservation; it still resolves for the grace.
+5. A **chosen** name is reserved for the grace.
+6. Resolution looks in the sender's own namespace first, current names then
+   former names, before any other namespace.
+
+This plan defers to #416 for the wire and the spec text; it must not restate
+them differently.
+
+**Today.** The bus name is fixed at the first `agent_up`. The daemon ignores a
+later hello's `proposed_name` while the agent is live, and the hub frees the old
+name at once. A re-sent `agent_up` for a live agent already renames on today's
+hub (`assignName` excludes self; no role or status side effects), and the
+fallback below relies on that.
+
+### Per harness: where the name comes from, and how a change is seen
+
+| Harness | Source | Detection |
+| --- | --- | --- |
+| Claude Code | session file `name` (`/rename`) | The daemon's 2 s `syncClaude` already reads every session file. It compares `name` to the last value seen. Also on each tool call's hello. |
+| OpenCode | root session `title` | The TUI plugin already reads `api.data.session.get` every 500 ms. It adds `titles: {root: title}` to its presence file, and the daemon's 2 s sync reads it. The tool-call hello also counts; `rootSession` stops caching `title`. |
+| Pi | `getSessionName()` | `session_info_changed {name}` event (Pi 1.4). |
+| omp | `getSessionName()` | No event, so poll on `turn_end` and on each tool call. |
+| Codex | `threads.name` in `$CODEX_HOME/state_5.sqlite`, set by `/rename` (`thread/name/set`). Not `title`, which is auto-derived. | Per call (Codex hellos are per call), plus the 2 s sync for live threads. Read-only `node:sqlite`. Where it is missing (Node < 22.13) or the schema differs, the name stays `codex`. Probe first (R393e). |
+
+**Return socket / `rename_uds_listen`: does not apply.** agent-bus publishes
+its own session file and must re-point the name it advertises. We only read
+Claude's file. Claude's `messagingSocketPath` is keyed by pid, and our daemon
+socket by `agent_ref`. No name is advertised anywhere we own.
+
+**Edge, not level.** The daemon keeps `harnessName` (the last value it saw) apart
+from `proposedName` (what it asks the hub for). A harness rename is when
+`harnessName` changes. Reading the same harness value again proposes nothing.
+
+### Precedence: the latest action wins
+
+A tool rename sets `proposedName` and leaves `harnessName` alone. A later
+harness rename (a new edge) overrides it. Why: both are deliberate acts. A tool
+pin would silently ignore the user's `/rename`, which is the complaint in #393.
+Reading harness state as a level would undo every tool rename within 2 s. On
+Pi/omp the tool also calls `setSessionName(name)`, so the session and the bus
+agree, and the event it fires repeats the same name (a no-op). Claude, OpenCode
+and Codex get no write-back. Daemon state is in memory, so a daemon restart
+re-announces the harness name.
+
+### Wire (Backend: shared + hub; Client: IPC)
+
+- **Hub frames** (`@ob/shared`):
+  - `rename {id, agent_ref, proposed_name}`, answered by `renamed {id, agent_ref, bus_name, former?}`.
+  - `former` is the name it left. It is absent on a no-op, i.e. when the assigned name is unchanged.
+  - Refusals are `error` with the frame's id: `not_registered` (the agent is not live), `rate_limited` (pinned `RENAME_MESSAGES.rate`), `bad_frame`.
+- **Roster:** `former_names?: [{name, expires_at}]`, newest first, at most `LIMITS.maxFormerNames = 5`. Same on `AgentInfo` (IPC), shown by `self`, `list_agents` and `open-bus status`.
+- **Receipt:** `to_name` again, on the IPC receipt (#394 removed the role case, so it now means one thing only). When a send resolves through a former name, `to_name` is the current name, and adapters render "formerly". It is gated like `former_names`: sent to adapters at or above `RENAME_MIN_CLIENT` only, and the daemon drops it below the gate.
+- **IPC:**
+  - `rename {name}` is answered by `agent` (the updated self) or `error`.
+  - The daemon→adapter push `renamed {name, former?}` goes to persistent links (Pi/omp). It covers a harness or hub-side change.
+- **Gate `RENAME_MIN_CLIENT`** (the release with R393a), on the AC5a pattern:
+  - The hub sends `former_names`, and a former-name `to_name`, only to daemons at or above it. Below it, the hub resolves the same, but with no `to_name`.
+  - The daemon sends `rename` only when `hello_ok.server_version` is at or above it. Against an older hub it re-sends `agent_up` with the new name: the rename still works, with no grace and no rate limit. At or above the gate the daemon **never** re-sends `agent_up` to rename. A re-sent `agent_up` there is a reopen (it clears status), not a rename.
+  - The daemon passes the new fields, and sends `renamed`, only to adapters at or above it (`legacy.ts`).
+  - Adapters offer the tool only when `daemon_version` is at or above it. An old daemon refuses `rename` as `bad_frame`.
+  - Frozen decoders (0.44, 0.54, latest released) must still accept every frame.
+
+### Hub rules (Backend)
+
+- **Former-name rows:** 10 renames an hour with a 1 h grace allow up to 10 live former names per agent. The roster shows the newest 5. Resolution, and reservation for the chosen ones, use every live row, so trimming at 5 never frees a name early.
+- **Reservation scope (chosen names only):** the scope `assignName` checks today, i.e. the namespace plus the global set for global agents. A global agent's former name is reserved globally.
+- **Revoke and close** drop former names at once. Mail already queued to the agent stays, since it's keyed by agent id.
+- **`to_name` gate:** daemons at or above `RENAME_MIN_CLIENT` get the former-name `to_name`. Daemons from 0.55 up to the gate get none, since #394 removed the role case. Below 0.55, nothing changes.
+
+- **De-collision, chosen names:** `assignName(proposed)` with `-2`, `-3`… as today, excluding self. A name taken includes another agent's chosen former names still in grace (agent-bus `_used_names`). The agent's own former names are free to it (A→B→A).
+- **De-collision, default names:** a name the harness did not choose, i.e. the kind's fallback (`pi`, `codex`, `code-96`), is minted as `<base>-<4 hex>`, and that name is never handed to another agent again. Why: a default name is not a decision anyone made, so reserving it for an hour would only push the next new session onto a worse name; a never-reused suffix needs no reservation and keeps resolution unambiguous.
+- **A chosen former name blocks reuse for the whole grace,** by renames and new `agent_up` alike. Otherwise a sender who knew the old name reaches a stranger. A former default name needs no block: it can never be assigned again.
+- **Default naming is a daemon-side fact, not a hub guess.** The hub cannot tell a harness default from a chosen name, so the daemon says which it is: the IPC hello and `rename` carry `name_kind: "default" | "chosen"`, and only a `chosen` name reserves. A daemon below `RENAME_MIN_CLIENT` says nothing, so the hub treats its name as `chosen` — reserving a default name is the safe error.
+- **Grace:** `LIMITS.formerNameGraceMs = 1 h`. This matches agent-bus `FORMER_NAME_GRACE_SECONDS`, and our queued-mail life of 1 h.
+- **Storage:** a table `former_names(agent_id, name, lname, expires_at)`, indexed on `lname`. Expired rows are purged on read and by the existing alarm. An agent's rows are dropped when it closes (`agent_down`, revoke), so the names free at once.
+- **Resolution:**
+  - The sender's **own namespace first**: a current live name there, then a live former name there. Only then another namespace, where a former name follows the same visibility rules as a current name.
+  - Within one namespace, current live names come before former names, then `goneReason`.
+  - A former name is never ambiguous: a chosen one cannot be reused inside the grace, and a default one can never be assigned. Across namespaces the usual ambiguity rule still applies.
+- **Rate limit:** 10 name changes per agent per rolling hour. A no-op doesn't count. The 11th gets `rate_limited`. This bounds a tool↔harness loop.
+- **No-op:** proposing the current name returns `renamed` without `former`, and records nothing.
+- **Effects:** the roster is broadcast (`rowChanged`). Status, inbox and session boundary are unchanged.
+- **#394:** R393b rebases on it. `roleTaken` and `resolveRole` are gone, and `to_name` means only "resolved under a different name". If #394 slips, R393b keeps `roleTaken` in `nameTaken` and gives role resolution priority over former names.
+
+### The tool
+
+`rename {name: string}` (1–64; the hub slugs it with `candidateName`). It goes in
+claude-code `TOOLS`, which gives Claude, OpenCode and Codex mode, plus the Pi/omp
+extension. agent-bus calls it `register`. We say `rename`, because `register`
+reads as joining.
+
+### Tasks (one PR each)
+
+- **R393a, Backend (shared):** frames, the roster and `AgentInfo` field, `RENAME_MIN_CLIENT`, the limits, `RENAME_MESSAGES`, and a spec update to the naming section. Tests:
+  - the schemas round-trip;
+  - `renamed` without `former` parses;
+  - over 5 former names is rejected;
+  - frozen 0.54 decoders reject `rename` (proving the gate is needed).
+- **R393b, Backend (hub):** table, handler, de-collision, resolution, gate, rate limit, purge. Tests:
+  - A→B, then a send to A is delivered, with `to_name` B;
+  - after 1 h, A is `unknown_agent`;
+  - a new agent asking for A gets A-2 within the grace;
+  - A→B→A is allowed;
+  - the 11th rename is `rate_limited`;
+  - a no-op is free;
+  - close drops the former names;
+  - a namespace-hidden former name is `unknown_agent`;
+  - a daemon below the gate gets no `former_names` and no `to_name`;
+  - `rename` from a non-live agent is `not_registered`;
+  - a default name gets a `-<4 hex>` suffix and that exact name is never assigned again (a second session proposing the same default gets a different one);
+  - a former default name resolves for the grace but is not reserved: a chosen name may take it, and resolution then prefers the live one in the sender's namespace;
+  - a former chosen name is unreserved to nobody: a new agent asking for it gets `<name>-2`;
+  - resolution order: a name that exists as a former name in the sender's namespace and as a current name in another resolves to the sender's own.
+- **R393c, Client (daemon, IPC, CLI status):** `harnessName` edges, the IPC `rename`, the `renamed` push, a hello `proposed_name` change on a live agent, `syncClaude` rename, the old-hub `agent_up` fallback, gating, `name_kind` (Backend's #416: on `agent_up` and `rename`, sent only to a hub at or above `RENAME_MIN_CLIENT`; absent means `chosen`), and `open-bus status` "(was x)". Tests:
+  - a Claude file `name` change sends one `rename`;
+  - an unchanged re-read sends none;
+  - **a Claude session resumed with a custom title re-reads the file after hello.** The name is read once today, at hello, so a `--resume` whose title arrives later comes up as Claude's default (`open-bus-e2` for "OB Manager"), and a `/rename` afterwards changes nothing. The daemon must read `sessions/<pid>.json` again after hello, and treat the first read and the later one as an edge only when they differ;
+  - a tool rename survives the next sync;
+  - a later harness edge overrides it;
+  - an old hub gets `agent_up`;
+  - a hub with R393a but not R393b answers `rename` with `error bad_frame`: fall back to `agent_up` for that rename, once;
+  - an old adapter gets no `former_names` and no `renamed`;
+  - a refusal reaches the caller.
+- **R393d, Client (adapters):** the `rename` tool everywhere; Pi `session_info_changed`; the omp poll; Pi/omp `setSessionName` write-back; OpenCode presence `titles` and the uncached title; receipt, `self` and `list_agents` copy. Tests:
+  - the tool is hidden below the gate;
+  - Pi's event triggers one rename;
+  - an omp name change is seen on `turn_end`;
+  - the write-back doesn't loop;
+  - an OpenCode title change is seen without a tool call;
+  - the former-name receipt copy shows;
+  - the asset hardening tests pass.
+- **R393e, Client (Codex name):** probe `state_5.sqlite` (schema, its WAL, `node:sqlite` availability), then read `threads.name` for live threads. Tests:
+  - a fixture db with a name, then the bus name follows;
+  - with no name or no `node:sqlite`, the name is `codex`;
+  - a locked db is a miss, not a crash;
+  - `docs/probes/codex.md` is updated.
+
+Order: a → b; c needs a; d needs c; e needs c.
+
+### Copy (DRAFT, for Design)
+
+- Tool: "Change your bus name. Agents reach you by the new name; your old name keeps working for 1 hour."
+- Arg `name`: "Your new name: lowercase words joined by `-`."
+- OK: "You are now `{name}` on the bus. `{former}` still reaches you until {time}."
+- Taken: "`{asked}` is taken, so you are now `{name}`."
+- No-op: "You are already `{name}`."
+- Rate limited: "Too many renames. Try again in a few minutes." (hub: "Too many renames")
+- Receipt: "Delivered to `{name}` (formerly `{to}`)." / "Queued for `{name}` (formerly `{to}`)."
+- `self`: "Former names: `{a}` (until {time})"; `list_agents`/`status`: "`{name}` (was `{former}`)".
+- Pi/omp push: "Your bus name is now `{name}`."
+
+### Decided (user, 2026-11-04)
+
+1. A former name blocks other sessions from taking it during the grace. **Yes.**
+2. A tool rename on Pi/omp also renames the harness session. **Yes:** one name everywhere. Claude, OpenCode and Codex can't, or won't, be written to.
+3. The grace is 1 h. **Yes:** it equals the mail TTL and agent-bus.
+4. A default name gets a unique, never-reused suffix and needs no reservation; it still resolves for the grace.
+5. Resolution checks the sender's own namespace first, current names then former names.
+
+The three answers were recorded on #399 before the plan merged; the spec's
+anti-goal (a sender choosing its own name through tool arguments, agent-bus
+#156) is reversed there and in #416, with the reason: the sender of a message
+is still the agent the daemon attests, so a name is a label, not an identity.
+
+### Follow-ups
+
+- Dashboard: an owner renames an agent (#393 item 4).
+- Dashboard: show former names on the agent row.
+- Daemon: keep a tool-set name across a daemon restart.
+- OpenCode: write a tool rename back to the session title.
