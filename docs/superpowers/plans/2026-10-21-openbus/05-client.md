@@ -4646,7 +4646,7 @@ rename, which is kept on disk (#430).
 
 ### Hub rules (Backend)
 
-- **Former-name rows:** at most `LIMITS.maxFormerNames` (5) are stored per agent, and the roster shows them all. A rename past the cap drops the oldest row, so that name stops resolving and is free again before its grace ends (#446: one agent must not reserve 10 names an hour).
+- **Former-name rows:** at most `LIMITS.maxFormerNames` (5) are stored per agent, and the roster shows them all (#446: one agent must not reserve 10 names an hour). Past the cap the oldest **default** row goes: it stops resolving, and the minted rule still keeps the name from anyone else. A **chosen** row is never dropped inside its grace (#449): with 5 chosen names in grace, a rename that would leave a sixth gets `rate_limited` (a rename back to one of them, or a case-only change, still works).
 - **Reservation scope (chosen names only):** the scope `assignName` checks today, i.e. the namespace plus the global set for global agents. A global agent's former name is reserved globally.
 - **Revoke and close** drop former names at once. Mail already queued to the agent stays, since it's keyed by agent id. A close keeps the rename log, so a reopen within the hour is still rate limited (#446). A revoke drops it.
 - **`to_name` gate:** daemons at or above `RENAME_MIN_CLIENT` get the former-name `to_name`. Daemons from 0.55 up to the gate get none, since #394 removed the role case. Below 0.55, nothing changes.
@@ -4662,8 +4662,9 @@ rename, which is kept on disk (#430).
   - Within one namespace, current live names come before former names, then `goneReason`.
   - A former name is never ambiguous: a chosen one cannot be reused inside the grace, and a default one can never be assigned. Across namespaces the usual ambiguity rule still applies.
 - **Rate limit:** 10 name changes per agent per rolling hour. A no-op doesn't count. The 11th gets `rate_limited`. This bounds a tool↔harness loop.
-- **A live `agent_up` that changes the name is a rename** (#446). Daemons below the gate rename this way. It counts in the rate limit and, in an unchanged scope, leaves a former name. At the limit the `agent_up` still succeeds but keeps the current name, because an `agent_up` must never fail.
-- **A minted name is never assigned to another agent** (#446), in any scope, during or after its grace. A chosen proposal that matches it is de-collided (`-2`). Its own agent may take it back.
+- **A live `agent_up` that changes the name is a rename** (#446). Daemons below the gate rename this way. It counts in the rate limit and, in an unchanged scope, leaves a former name. Where `rename` would get `rate_limited`, the `agent_up` still succeeds but keeps the current name, because an `agent_up` must never fail. The hub logs `rename_kept`; the daemon is not told, and replays its proposed name on a later `agent_up` (after the hour it goes through). Telling the daemon is Client's, #447.
+- **A reopen under a new name counts too** (#449). A closed agent's `agent_up` with a different name counts in the rate limit, so close and reopen is no way around it, but leaves no former name: the close freed the old name at once, and someone may hold it by now. At the limit the reopen keeps its old name.
+- **A minted name is never assigned to another agent** (#446), in any scope, during or after its grace. A chosen proposal that matches it is de-collided (`-2`). Its own agent may take it back. An agent that took a minted name through the old hole gets `<name>-2` on its next `agent_up` (a reconnect replays it), leaving no former name, so the hole heals itself and the name goes back to its own agent.
 - **No-op:** proposing the current name returns `renamed` without `former`, and records nothing.
 - **Effects:** the roster is broadcast (`rowChanged`). Status, inbox and session boundary are unchanged.
 - **#394:** R393b rebases on it. `roleTaken` and `resolveRole` are gone, and `to_name` means only "resolved under a different name". If #394 slips, R393b keeps `roleTaken` in `nameTaken` and gives role resolution priority over former names.

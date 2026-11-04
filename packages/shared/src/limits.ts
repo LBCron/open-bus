@@ -40,7 +40,7 @@ export const LIMITS = {
   maxMachinesListed: 100,
   /** A former name reaches its agent, and is reserved from others, this long after a rename (#393). Equals the mail TTL. */
   formerNameGraceMs: 3_600_000,
-  /** Former names shown per roster row, newest first. The hub may hold more live ones (up to renamesPerHour). */
+  /** Former names stored per agent and shown per roster row, newest first. Past it the hub drops the oldest default one; it never drops a chosen one in its grace, and refuses a rename (`rate_limited`) that would need to (#449). */
   maxFormerNames: 5,
   /** Name changes per agent per rolling hour; past it `rename` gets `error rate_limited`. A no-op doesn't count. */
   renamesPerHour: 10,

@@ -891,14 +891,66 @@ function renameAllowed(sql: SqlStorage, agentId: string, now: number): boolean {
 }
 
 /**
+ * Who `lname` was minted for, from this agent's side: `self` (a default
+ * name), `other` (taken through the hole #446 closed; never this agent's to
+ * keep) or null (never minted).
+ */
+function mintedFor(
+  sql: SqlStorage,
+  agentId: string,
+  lname: string,
+): "self" | "other" | null {
+  const owner = one<{ agentId: string }>(
+    sql,
+    "select agent_id as agentId from minted_names where org_id = ? and lname = ?",
+    OWNER_ORG_ID,
+    lname,
+  )?.agentId;
+  return owner === undefined ? null : owner === agentId ? "self" : "other";
+}
+
+/**
+ * #449 B1: whether a change from `former` to `name` has room for the
+ * former-name row it leaves. A chosen former name is reserved and is never
+ * dropped inside its grace, so at LIMITS.maxFormerNames chosen rows in grace
+ * (not counting the two names involved: the new one's own row goes, the old
+ * one's is replaced) a change that leaves another chosen row is refused. A
+ * case-only change or a minted (default) former name always has room.
+ */
+function formerRoom(
+  sql: SqlStorage,
+  agentId: string,
+  former: string,
+  name: string,
+  now: number,
+): boolean {
+  const lformer = former.toLowerCase();
+  const lname = name.toLowerCase();
+  if (lformer === lname || mintedFor(sql, agentId, lformer) !== null)
+    return true;
+  const chosen =
+    one<{ n: number }>(
+      sql,
+      `select count(*) as n from former_names indexed by former_names_agent
+        where agent_id = ? and expires_at > ? and kind = 'chosen' and lname != ? and lname != ?`,
+      agentId,
+      now,
+      lformer,
+      lname,
+    )?.n ?? 0;
+  return chosen < LIMITS.maxFormerNames;
+}
+
+/**
  * R393b: records a name change from `former` to `name` (they differ
- * exactly): one rename_rl row, and unless only the case changed (the old
- * name already resolves) a former-name row for LIMITS.formerNameGraceMs,
- * `default` when the name was minted for this agent (it is never handed on,
- * so it needs no reservation), else `chosen`. #446: at most
- * LIMITS.maxFormerNames rows are stored per agent; an older one is dropped,
- * so it stops resolving and is free again. Returns the grace's end to arm
- * the alarm for, or null.
+ * exactly; formerRoom allowed it): one rename_rl row, and unless only the
+ * case changed (the old name already resolves) a former-name row for
+ * LIMITS.formerNameGraceMs, `default` when the name was minted for this
+ * agent (it is never handed on, so it needs no reservation), else `chosen`.
+ * #446/#449: at most LIMITS.maxFormerNames rows are stored per agent. Past
+ * it the oldest DEFAULT rows go (they stop resolving; the minted rule still
+ * keeps the name from anyone else); a chosen row in grace never goes.
+ * Returns the grace's end to arm the alarm for, or null.
  */
 function recordRename(
   sql: SqlStorage,
@@ -909,20 +961,22 @@ function recordRename(
 ): number | null {
   sql.exec("insert into rename_rl (agent_id, at) values (?, ?)", agentId, now);
   const lformer = former.toLowerCase();
-  // One row per name per agent: a reused former name is replaced.
+  const lname = name.toLowerCase();
+  // One row per name per agent: a reused former name is replaced, and the
+  // new name's own row goes (commitName would drop it too), as do expired
+  // rows, before the cap is applied.
   sql.exec(
-    "delete from former_names where agent_id = ? and lname = ?",
+    "delete from former_names where agent_id = ? and (lname = ? or lname = ? or expires_at <= ?)",
     agentId,
     lformer,
+    lname,
+    now,
   );
-  if (lformer === name.toLowerCase()) return null;
-  const minted = one(
-    sql,
-    "select 1 as x from minted_names where org_id = ? and lname = ? and agent_id = ?",
-    OWNER_ORG_ID,
-    lformer,
-    agentId,
-  );
+  if (lformer === lname) return null;
+  const minted = mintedFor(sql, agentId, lformer);
+  // #449 N3: a name minted for another agent, held through the old hole,
+  // leaves no former row: it goes back to its own agent at once.
+  if (minted === "other") return null;
   const expires = now + LIMITS.formerNameGraceMs;
   sql.exec(
     "insert into former_names (agent_id, org_id, name, lname, kind, expires_at) values (?, ?, ?, ?, ?, ?)",
@@ -930,16 +984,22 @@ function recordRename(
     OWNER_ORG_ID,
     former,
     lformer,
-    minted ? "default" : "chosen",
+    minted === "self" ? "default" : "chosen",
     expires,
   );
-  sql.exec(
-    `delete from former_names where agent_id = ? and rowid not in
-       (select rowid from former_names indexed by former_names_agent where agent_id = ? order by expires_at desc, rowid desc limit ?)`,
-    agentId,
-    agentId,
-    LIMITS.maxFormerNames,
-  );
+  const excess =
+    (one<{ n: number }>(
+      sql,
+      "select count(*) as n from former_names where agent_id = ?",
+      agentId,
+    )?.n ?? 0) - LIMITS.maxFormerNames;
+  if (excess > 0)
+    sql.exec(
+      `delete from former_names where rowid in
+         (select rowid from former_names where agent_id = ? and kind = 'default' order by expires_at, rowid limit ?)`,
+      agentId,
+      excess,
+    );
   return expires;
 }
 
@@ -949,10 +1009,16 @@ function recordRename(
  *
  * #446: a re-sent agent_up that changes a LIVE agent's name is a rename
  * (daemons below RENAME_MIN_CLIENT rename this way): it counts in rename_rl
- * and, in an unchanged scope, leaves a former name as `rename` does. At the
- * limit the agent_up still succeeds (it must never fail: it is also a
- * reconnect) but keeps the current name. A namespace move or global flip
- * drops the former names, as before; its name change still counts.
+ * and, in an unchanged scope, leaves a former name as `rename` does. Where
+ * `rename` would answer rate_limited (the hourly limit, or #449 no room for
+ * another chosen former name) the agent_up still succeeds (it must never
+ * fail: it is also a reconnect) but keeps the current name, logged as
+ * `rename_kept`. A namespace move or global flip drops the former names, as
+ * before; its name change still counts.
+ *
+ * #449 N1: a reopen (the agent was closed) under a new name counts too, so
+ * close and reopen is no way around the limit, but leaves no former name:
+ * the close freed the old name at once, and someone may hold it by now.
  */
 function agentUp(
   sql: SqlStorage,
@@ -994,16 +1060,22 @@ function agentUp(
     existing?.namespace === f.namespace &&
     existing?.global === (f.global ? 1 : 0);
   let armAt: number | null = null;
-  if (wasLive && assigned.name !== existing.name) {
-    if (renameAllowed(sql, id, now)) {
-      if (sameScope)
+  if (existing && assigned.name !== existing.name) {
+    const former = wasLive && sameScope;
+    if (
+      renameAllowed(sql, id, now) &&
+      (!former || formerRoom(sql, id, existing.name, assigned.name, now))
+    ) {
+      if (former)
         armAt = recordRename(sql, id, existing.name, assigned.name, now);
       else
         sql.exec("insert into rename_rl (agent_id, at) values (?, ?)", id, now);
     } else {
-      logEvent("rate_limited", { kind: "rename", machineId });
+      // #449 N2: the agent_up succeeds under its current name; the daemon is
+      // not told (Client, #447), so the kept name is logged.
+      logEvent("rename_kept", { machineId, reopen: !wasLive });
       // The current name (its own, minted or not), de-collided only when a
-      // move puts it in a scope where it is taken.
+      // move or a reopen finds it taken.
       assigned = assignName(sql, f.namespace, existing.name, f.global, id, now);
     }
   }
@@ -2940,7 +3012,10 @@ export class Hub extends DurableObject<Env> {
     }
     // The exact no-op check (assignName writes nothing), then the rate
     // limit, then the commit: a no-op never counts, a refusal changes nothing.
-    if (!renameAllowed(sql, agent.id, now)) {
+    if (
+      !renameAllowed(sql, agent.id, now) ||
+      !formerRoom(sql, agent.id, agent.name, name, now)
+    ) {
       logEvent("rate_limited", { kind: "rename", machineId: agent.machineId });
       sendError(ws, f.id, "rate_limited", RENAME_MESSAGES.rate);
       return;
