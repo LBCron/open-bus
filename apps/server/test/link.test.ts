@@ -463,7 +463,7 @@ describe("POST /link/confirm", () => {
     expect(logged).not.toContain(aud);
   });
 
-  it("full linked_apps: 409 page, no assertion", async () => {
+  it("full linked_apps: error=limit_reached to the callback, no assertion", async () => {
     const h = hub(DEV);
     const before = await linked();
     const fill: string[] = [];
@@ -475,9 +475,10 @@ describe("POST /link/confirm", () => {
     try {
       const aud = newAud();
       const r = await post(await begin(aud), "allow");
-      expect(r.status).toBe(409);
-      expect(r.headers.get("location")).toBeNull();
-      expect(r.headers.get("content-type")).toMatch(/^text\/html/);
+      expect(r.status).toBe(303);
+      expect(r.headers.get("location")).toBe(
+        `${aud}${LINK_CALLBACK_PATH}#error=limit_reached&state=${STATE}`,
+      );
       clears(r);
       expect(await linked()).not.toContain(aud);
     } finally {

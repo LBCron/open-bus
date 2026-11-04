@@ -22,13 +22,7 @@ import { clientIp, clientKey, enforceRateLimit } from "../http/rate-limit.js";
 import { hub } from "../hub/stub.js";
 import { b64urlEncode } from "../util/crypto.js";
 import { approveCsp } from "./approve.js";
-import {
-  esc,
-  type PageBase,
-  pageBase,
-  REFERRER_POLICY,
-  shell,
-} from "./approve-page.js";
+import { pageBase, REFERRER_POLICY } from "./approve-page.js";
 import { HTML_CSP } from "./auth.js";
 import {
   linkSwitchUrl,
@@ -93,18 +87,6 @@ const errorPage = (
   status: number,
   x?: Extra,
 ) => html(renderLinkError(pageBase(env), reason), status, x);
-
-/** 409: the bus already has MAX_LINKED_APPS linked apps. Echoes nothing from the request. */
-function renderLinkFull(v: PageBase): string {
-  const title = "Too many linked apps";
-  const body =
-    "Unlink an app in Settings, then start again from the app's settings.";
-  return shell(
-    v,
-    title,
-    `<main class="flex items-center justify-center"><div data-slot="card" class="flex flex-col gap-6 rounded-xl border bg-card py-6 shadow-sm"><div data-slot="card-header" class="grid gap-2 px-6"><h1 data-slot="card-title" class="leading-none font-semibold text-xl">${esc(title)}</h1><p data-slot="card-description" class="text-sm text-muted-foreground">${esc(body)}</p></div><small class="px-6 text-center">You can close this tab.</small></div></main>`,
-  );
-}
 
 /** A 303 to OA carrying the outcome in the fragment only. Never logged. */
 const toApp = (env: Env, r: LinkRequest, frag: string) =>
@@ -198,8 +180,9 @@ export function mountLink(app: AppType): void {
       return errorPage(c.env, "bad_request", 400, { cookie });
     const keys = await cardKeys(c.env);
     if (!keys) return errorPage(c.env, "bad_request", 503, { cookie });
+    // Full: tell OA via the callback so its link attempt doesn't stall (#387).
     if (!(await hub(c.env).linkApp(req.aud)))
-      return html(renderLinkFull(pageBase(c.env)), 409, { cookie });
+      return toApp(c.env, req, "error=limit_reached");
     const jws = await assertion(c.env, keys, req.aud, req.state);
     return toApp(c.env, req, `assertion=${jws}`);
   });
