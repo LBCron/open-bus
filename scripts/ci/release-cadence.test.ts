@@ -4,6 +4,7 @@ import {
   blocker,
   DRAIN_CAP_MS,
   type Exec,
+  HOLD_CHECK,
   HOLD_LABEL,
   RELEASE_BRANCH,
   willWrite,
@@ -523,6 +524,39 @@ describe("blocker", () => {
     const { r, g } = await run({ pr: { createdAt: hoursAgo(25) } });
     expect(r.action).toBe("opened");
     expect(title(g.wrote("issue create")[0] as string[])).toContain("24 hours");
+  });
+
+  it("ignores the release-hold check itself: a held PR is not a stuck one (#435)", async () => {
+    const hold = {
+      __typename: "CheckRun",
+      name: HOLD_CHECK,
+      conclusion: "FAILURE",
+      detailsUrl: "https://ci/hold",
+    };
+    const held = await run({
+      pr: { state: "FAILURE", labels: [HOLD_LABEL], contexts: [hold] },
+    });
+    expect(held.r.action).toBe("none");
+    expect(held.g.wrote("issue create")).toEqual([]);
+    // Another failing check still opens one, naming only that check.
+    const both = await run({
+      pr: {
+        state: "FAILURE",
+        contexts: [
+          hold,
+          {
+            __typename: "CheckRun",
+            name: "test",
+            conclusion: "FAILURE",
+            detailsUrl: "https://ci/test",
+          },
+        ],
+      },
+    });
+    expect(both.r).toEqual({ action: "opened" });
+    const b = body(both.g.wrote("issue create")[0] as string[]);
+    expect(b).toContain("[test](https://ci/test)");
+    expect(b).not.toContain(HOLD_CHECK);
   });
 
   it("opens nothing for a young, green PR", async () => {

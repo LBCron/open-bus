@@ -20,11 +20,18 @@ While the label is on:
   run still wins.
 - If the cadence already armed the PR and it is not yet in the queue, the next
   run disables auto-merge. It never touches an arm a person set.
-- Once the PR is in the merge queue, the label no longer stops it. Remove it
-  from the queue in GitHub instead.
+- The `release-hold` check fails (`.github/workflows/release-hold.yml`, #435).
+  It's a required check, so a held release PR can't merge. It runs on the PR's
+  label events and in the merge queue, where it reads the queued PR's live
+  labels.
+- Adding the label while the PR is already in the merge queue takes it out of
+  the queue (the `dequeue` job). The queue's `release-hold` run may already
+  have passed by then, so the check alone wouldn't stop it.
+- The failing `release-hold` check doesn't open a `blocker` issue: a held
+  release isn't a stuck one.
 
-Remove the label to release. The next cadence run (every 15 minutes, or after
-CI) arms the PR as usual:
+Remove the label to release. The `release-hold` check re-runs and passes, and
+the next cadence run (every 15 minutes, or after CI) arms the PR as usual:
 
     gh pr edit <release PR> --remove-label release-hold
 

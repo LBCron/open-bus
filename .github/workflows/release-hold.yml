@@ -1,0 +1,52 @@
+name: release-hold
+# The structural release hold (#435, docs/ops/releases.md). `release-hold` fails
+# while the release PR carries the release-hold label: on the PR (label events
+# re-run it) and in the merge queue (it reads the queued PR's live labels).
+# Required by the main ruleset, so a held release PR can't merge. A hold added
+# after the queue's run already passed is caught by `dequeue`, which takes the
+# queued release PR out of the queue.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  merge_group:
+permissions: {}
+concurrency:
+  group: release-hold-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  release-hold:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.head_ref || github.head_ref }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: node --experimental-strip-types scripts/ci/release-hold.ts check --repo "$GITHUB_REPOSITORY"
+  dequeue:
+    if: ${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'release-hold' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: dequeue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: node --experimental-strip-types scripts/ci/release-hold.ts dequeue --repo "$GITHUB_REPOSITORY" --pr "$PR"
