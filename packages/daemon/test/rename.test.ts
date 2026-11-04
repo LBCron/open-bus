@@ -2,7 +2,7 @@
 // edge the daemon notices; the `rename` tool sets the name it asks the hub for;
 // and both reach the wire as `rename` at the gate, or as a re-sent `agent_up`
 // below it.
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type DaemonFrame, daemonStatus } from "@ob/ipc";
@@ -140,6 +140,43 @@ describe("the harness edge (#393)", () => {
     });
     await settle();
     expect(h.of("rename")).toHaveLength(1);
+  });
+
+  it("a restarted session with no name yet keeps the name it had (#393)", async () => {
+    const d = dir();
+    writeSession(d, 4242, "ob-manager");
+    const h = await claudeHarness(d, { syncMs: 20 });
+    expect((await h.next("agent_up")).proposed_name).toBe("ob-manager");
+    await gatedHub(h);
+
+    // The session goes away, then comes back with the same sessionId, a new
+    // pid and no name in its fresh file: the pid default must not rename it.
+    rmSync(join(d, "4242.json"));
+    await vi.waitFor(() =>
+      expect(h.of("sessions").at(-1)?.closed ?? []).toContain("s4242"),
+    );
+    writeFileSync(
+      join(d, "5151.json"),
+      JSON.stringify({
+        pid: 5151,
+        sessionId: "s4242",
+        procStart: "t0",
+        cwd: "/repo",
+      }),
+    );
+    const up = await vi.waitFor(async () => {
+      const found = h
+        .of("agent_up")
+        .find(
+          (f) => f.agent_ref === "s4242" && f.proposed_name === "ob-manager",
+        );
+      expect(found).toBeDefined();
+      return found as Extract<ToHub, { type: "agent_up" }>;
+    });
+    expect(up.proposed_name).toBe("ob-manager");
+    expect(
+      h.of("agent_up").some((f) => f.proposed_name === "claude-5151"),
+    ).toBe(false);
   });
 
   it("takes a live agent's later hello as the harness's own edge", async () => {
@@ -414,8 +451,8 @@ describe("the adapter gate (#393)", () => {
   });
 });
 
-describe("an OpenCode title (#393)", () => {
-  it("is a rename without a tool call, once the presence file carries it", async () => {
+describe("an OpenCode presence title (#393)", () => {
+  it("is not a rename source: the adapter's hello carries the slug", async () => {
     const presence = dir();
     const write = (title: string) =>
       writeFileSync(
@@ -449,8 +486,18 @@ describe("an OpenCode title (#393)", () => {
     await settle();
     expect(h.of("rename")).toEqual([]);
 
-    // The title arrives without a tool call: R393d's plugin writes it.
+    // A raw title is never proposed: the adapter sends `nameOf(title)`, so
+    // reading the title here too would alternate the two forms every 2 s.
     write("Fix the flaky test");
+    await settle();
+    expect(h.of("rename")).toEqual([]);
+
+    // The hello is the source, and it proposes the slug.
+    await h.adapter("ses_root", {
+      kind: "opencode",
+      proposed_name: "fix-the-flaky-test",
+      cwd: "/repo",
+    });
     const rename = await vi.waitFor(() => {
       const found = h.of("rename")[0];
       expect(found).toBeDefined();
@@ -458,7 +505,7 @@ describe("an OpenCode title (#393)", () => {
     });
     expect(rename).toMatchObject({
       agent_ref: "ses_root",
-      proposed_name: "Fix the flaky test",
+      proposed_name: "fix-the-flaky-test",
       name_kind: "chosen",
     });
   });

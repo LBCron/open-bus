@@ -69,7 +69,6 @@ import {
   lstartEpoch,
   opencodePresenceDir,
   openSessions,
-  openSessionTitles,
 } from "./presence/opencode.ts";
 import { nameKindOf, offersRename, Renames } from "./rename.ts";
 import { Resends } from "./resend.ts";
@@ -187,8 +186,6 @@ export type DaemonDeps = {
     presenceDir?: string;
     /** Replaces reading presence files: the open root session ids. */
     openSessions?: () => Set<string>;
-    /** Replaces reading presence files' titles (#393): root session id to title. */
-    titles?: () => Map<string, string>;
     /** Runs `opencode api`; default execFile with a 20 s kill timeout. */
     spawn?: Spawn;
     procStart?: (pid: number) => string | null;
@@ -428,14 +425,6 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
         isRunning: ocRunning,
         procStartEpoch: (pid, stamp) => lstartEpoch(ocStart(pid, stamp)),
       }));
-  /** Root session titles, read on every tick like presence (#393); absent until R393d's plugin writes them. */
-  const openCodeTitles =
-    oc.titles ??
-    (() =>
-      openSessionTitles(presenceDir, {
-        isRunning: ocRunning,
-        procStartEpoch: (pid, stamp) => lstartEpoch(ocStart(pid, stamp)),
-      }));
   const ocSpawn = oc.spawn ?? execSpawn(20_000);
   /** Unknown until read, just before the hub link starts: no delivery comes sooner. */
   let promptIdSupported = false;
@@ -643,12 +632,16 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
         continue;
       }
       if (!WireNamespaceSchema.safeParse(ns.namespace).success) continue;
+      // A restarted session (same ref, new pid) has no name in its fresh file
+      // yet. Proposing the pid default would rename it; propose what it had.
+      const unnamed = nameKindOf("claude-code", s.name) === "default";
+      const proposal = unnamed && prev ? prev.busName : s.name;
       announceUp(
         agents.up({
           ref: s.ref,
           kind: "claude-code",
-          proposedName: s.name,
-          nameKind: nameKindOf("claude-code", s.name),
+          proposedName: proposal,
+          nameKind: nameKindOf("claude-code", proposal),
           harnessName: s.name,
           busName: prev?.busName ?? s.name,
           namespace: ns.namespace,
@@ -690,12 +683,12 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
    */
   const syncOpenCode = () => {
     const open = openCodeSessions();
-    // A root session's title (R393d writes it): a changed one is a rename (#393).
-    const titles = openCodeTitles();
     let closed = false;
     for (const a of agents.all()) {
       if (a.kind !== "opencode") continue;
-      renames.harness(a, titles.get(a.ref));
+      // No title source here: the adapter's hello carries `nameOf(title)`, and
+      // two sources for one name flap (a raw title vs its slug). R393d adds
+      // the title to the hello, not to the presence file.
       if (a.live && !open.has(a.ref)) {
         a.live = false;
         closed = true;
