@@ -1775,14 +1775,20 @@ function resolveTarget(
   // R393b: the sender's own namespace first, current then former names.
   const own = visibleIn(sender.namespace);
   if (own) return own;
-  // A live global sorts first and is the only live agent with its name.
+  // A live global sorts first and is the only live agent with its name
+  // (and no chosen former name can share it: nameTaken).
   const live = liveAnywhere(sql, lname, 2);
   const first = live[0];
-  if (first && (first.global === 1 || live.length === 1))
-    return { ok: true, agent: first };
+  if (first?.global === 1) return { ok: true, agent: first };
   if (live.length > 1) return refused("ambiguous");
-  // Then former names elsewhere, under the same ambiguity rule.
+  // Then former names elsewhere, under the same ambiguity rule. #452: one
+  // live name in one namespace and another agent's former name in another
+  // is ambiguous too (a chosen former name is reserved only in its scope).
   const former = liveFormer(sql, lname, now, null, 2);
+  if (first)
+    return former.some((r) => r.id !== first.id)
+      ? refused("ambiguous")
+      : { ok: true, agent: first };
   const f = former[0];
   if (f && (f.global === 1 || former.length === 1))
     return { ok: true, agent: f };

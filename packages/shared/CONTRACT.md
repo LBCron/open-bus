@@ -75,7 +75,7 @@ One JSON object per WebSocket text message. Every frame is a strict object `{v: 
 - Non-global sender without `to_namespace`: its own namespace first, then global agents. A name found in neither is `unknown_agent` (or `closed` if it closed in the sender's own namespace or was a global), even when it is live in another namespace: other namespaces are "invisible and unreachable" (spec goal 5, scenario 6), so the refusal reveals nothing about them.
 - `other_namespace` is only the answer to an explicit `to_namespace` the sender may not target, and it is identical whether or not the name exists there.
 - Global sender with `to_namespace`: that name in that namespace.
-- Global sender without it: a global target, or a name matching in exactly one namespace, resolves. A name matching in two or more is refused `ambiguous`. Global names are unique, so a global target is never ambiguous.
+- Global sender without it: a global target, or a name matching in exactly one namespace, resolves. A name matching in two or more is refused `ambiguous`; a live name in one namespace and another agent's former name (in its grace) in another count as two (#452). The sender's own namespace is looked at first. Global names are unique, so a global target is never ambiguous.
 - The refusal must not leak whether a name exists: a refusal for an inaccessible target is identical whether or not the name exists there.
 
 ### `send` idempotency (B14)

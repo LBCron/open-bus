@@ -1368,3 +1368,32 @@ it("#451: migrateHub anchors existing former names to their agent's scope", asyn
   expect(got).toEqual({ namespace: n, global: 1 });
   d.close();
 });
+
+it("#452: a global's unscoped send is ambiguous across a current name and a former name in other namespaces", async () => {
+  const d = await at();
+  const x = ns("rn");
+  const y = ns("rn");
+  const z = ns("rn");
+  const alice = uniq("alice");
+  await reg(d, "a", alice, x);
+  const bob = uniq("bob");
+  await renamed(d, "a", bob);
+  expect(await reg(d, "c", alice, y)).toBe(alice);
+  await reg(d, "g", uniq("G"), z, { global: true });
+  expect(await send(d, "g", alice)).toMatchObject({
+    state: "refused",
+    reason: "ambiguous",
+  });
+  // A namespace given picks one.
+  const toC = await send(d, "g", alice, y);
+  expect(toC.state).toBe("pending");
+  expect(toC.to_name).toBeUndefined();
+  expect((await delivered(d, toC.msg_id)).to_ref).toBe("c");
+  // The global sender's own namespace still comes first.
+  await reg(d, "h", uniq("H"), x, { global: true });
+  expect(await send(d, "h", alice)).toMatchObject({
+    state: "pending",
+    to_name: bob,
+  });
+  d.close();
+});
