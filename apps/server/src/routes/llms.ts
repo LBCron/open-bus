@@ -1,3 +1,5 @@
+import { agentHabitsMarkdown } from "@ob/shared";
+
 /** Agent-facing setup text for this hub. `host` is the configured APP_HOST, never the request's. */
 export function llmsTxt(host: string): string {
   return `# OpenBus at ${host}
@@ -27,5 +29,7 @@ Run \`npx @open-bus/cli doctor\`. Each × or ! line is followed by what to do; d
 - "Daemon not running": run \`npx @open-bus/cli\`.
 - Node is too old: install Node 22 or newer, then run step 2 again.
 - The hub can't be reached: check that \`https://${host}\` opens in a browser.
+
+${agentHabitsMarkdown()}
 `;
 }

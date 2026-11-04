@@ -10,6 +10,11 @@ import {
   HelloRefused,
   SPAWNED_SOURCES,
 } from "@ob/ipc";
+import {
+  type CodexNameDeps,
+  codexThreadName,
+  DEFAULT_CODEX_NAME,
+} from "./codex-name.ts";
 import { callTool, TOOLS, type ToolResult } from "./tools.ts";
 
 /** Codex sets this on every tools/call, next to `threadId` and `callId`; the model does not control it. */
@@ -107,11 +112,16 @@ export function codexCall(meta: unknown): CodexCall | { refuse: string } {
 /**
  * The hello for one call: the daemon re-proves the thread and this call id
  * each time. Undefined when a fact cannot go on the wire.
+ *
+ * `proposedName` is the thread's `name` in Codex's state db (#393e): Codex
+ * hellos are per call, so a `/rename` on the Codex side is a rename on the
+ * bus at its next tool call. Absent, it is the harness default, `codex`.
  */
 export function codexHello(
   call: CodexCall,
   pid: number,
   ppid: number,
+  proposedName: string = DEFAULT_CODEX_NAME,
 ): Hello | undefined {
   const hello = Hello.safeParse({
     v: 1,
@@ -122,7 +132,7 @@ export function codexHello(
     agent_ref: call.threadId,
     pid,
     ...(call.cwd ? { cwd: call.cwd } : {}),
-    proposed_name: "codex",
+    proposed_name: proposedName,
     codex: {
       thread_id: call.threadId,
       call_id: call.callId,
@@ -144,6 +154,8 @@ export type CodexDeps = {
   connect: (hello: Hello) => Promise<DaemonClient>;
   pid?: number;
   ppid?: number;
+  /** Where the thread's name is read (#393e); a test brings a temp `CODEX_HOME`. */
+  name?: CodexNameDeps;
 };
 
 /**
@@ -167,14 +179,20 @@ export function codexServer(deps: CodexDeps): Server {
     try {
       const call = codexCall(req.params._meta);
       if ("refuse" in call) return refused(call.refuse);
-      const hello = codexHello(call, pid, ppid);
-      if (!hello) return refused(NO_IDENTITY);
-      // Pinned only by a call whose hello is valid: a bad first call claims nothing.
-      thread ??= call.threadId;
-      if (call.threadId !== thread)
+      if (thread !== undefined && call.threadId !== thread)
         return refused(
           `openbus: this OpenBus server belongs to Codex thread ${thread}, not ${call.threadId}.`,
         );
+      // The name is read before the hello: the hello carries it (#393e).
+      const hello = codexHello(
+        call,
+        pid,
+        ppid,
+        codexThreadName(call.threadId, deps.name),
+      );
+      if (!hello) return refused(NO_IDENTITY);
+      // Pinned only by a call whose hello is valid: a bad first call claims nothing.
+      thread ??= call.threadId;
       let client: DaemonClient;
       try {
         client = await deps.connect(hello);

@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
+import { AGENT_HABITS } from "@ob/shared";
 import { describe, expect, it } from "vitest";
 import { REPO_URL, SITE_URL } from "../src/consts";
 
@@ -23,6 +24,14 @@ const source = (await import("../src/pages/llms.txt.ts")) as {
 const body = await source.GET().text();
 
 describe("llms.txt", () => {
+  it("renders every working-with-other-agents habit, after Tools (#425)", () => {
+    expect(body).toContain("\n## Working with other agents\n");
+    expect(body.indexOf("## Working with other agents")).toBeGreaterThan(
+      body.indexOf("## Tools"),
+    );
+    for (const h of AGENT_HABITS) expect(body).toContain(`\n- ${h}\n`);
+  });
+
   it("starts with the product name and summary", () => {
     expect(body.startsWith("# OpenBus\n")).toBe(true);
   });

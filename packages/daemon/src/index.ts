@@ -1,5 +1,5 @@
 import { lstatSync, writeFileSync } from "node:fs";
-import { basename, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { claudeSessionsDir } from "@ob/adapter-claude-code";
 import {
   MIN_PROMPT_ID_VERSION,
@@ -15,6 +15,7 @@ import {
   isWellFormed,
   lateDeliveredText,
   receiptText,
+  seesRename,
   serveDaemon,
   stripTerminalControls,
   unconfirmedText,
@@ -36,6 +37,7 @@ import {
   procStartOf,
 } from "./attest.ts";
 import { AgentCard, CARD_COPY, hubTooOld, offersCard } from "./card.ts";
+import { ChosenNames } from "./chosen-names.ts";
 import {
   type CodexAttestDeps,
   codexAttestor,
@@ -55,8 +57,10 @@ import {
 } from "./config.ts";
 import { createDeliver, type DeliverFn, type NotifyFn } from "./deliver.ts";
 import { HubConnection, type HubOptions } from "./hub.ts";
+import { HubGate } from "./hub-gate.ts";
 import {
   cachedProcStart,
+  claudeSessionName,
   claudeTarget,
   isRunning,
   liveClaudeSessions,
@@ -68,6 +72,7 @@ import {
   opencodePresenceDir,
   openSessions,
 } from "./presence/opencode.ts";
+import { nameKindOf, offersRename, Renames } from "./rename.ts";
 import { Resends } from "./resend.ts";
 import { type AgentCap, capOf, Pending, routeLocal } from "./routes.ts";
 import {
@@ -98,16 +103,19 @@ import { PiTransport } from "./transports/pi.ts";
 export * from "./agents.ts";
 export * from "./attest.ts";
 export * from "./card.ts";
+export * from "./chosen-names.ts";
 export * from "./codex-attest.ts";
 export * from "./config.ts";
 export * from "./dedupe.ts";
 export * from "./deliver.ts";
 export * from "./global.ts";
 export * from "./hub.ts";
+export * from "./hub-gate.ts";
 export * from "./liveness/claude.ts";
 export * from "./namespace.ts";
 export * from "./outbox.ts";
 export * from "./presence/opencode.ts";
+export * from "./rename.ts";
 export * from "./resend.ts";
 export * from "./routes.ts";
 export * from "./sent.ts";
@@ -130,6 +138,16 @@ export type DaemonDeps = {
   notifiers?: Partial<Record<AgentRecord["kind"], NotifyFn>>;
   /** Outgoing msg_ids awaiting a final receipt (0600); default ~/.openbus/sent.json. */
   sentFile?: string;
+  /**
+   * The last hub version seen, for #393's gate before a link's hello_ok
+   * (0600); default ~/.openbus/hub-version.json.
+   */
+  hubVersionFile?: string;
+  /**
+   * Names a `rename` chose, per agent_ref, so a restart proposes them after
+   * one (0600); default ~/.openbus/names.json.
+   */
+  namesFile?: string;
   version?: string;
   log?: (msg: string) => void;
   /** Log each successful attestation; default: OPENBUS_DEBUG=1, read at startup. */
@@ -260,8 +278,14 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
       if (!agents.byRef(ref)?.live) clearLimited(ref);
     return hub.send({ v: 1, id: frameId(), type: "sessions", ...sessions() });
   };
-  /** agent_up ids awaiting the hub's answer, to their agent_ref and the kind sent; cleared with the link. */
-  const upIds = new Map<string, { ref: string; kind: string }>();
+  /**
+   * agent_up ids awaiting the hub's answer, to their agent_ref, the kind sent,
+   * and whether the frame carried `name_kind`; cleared with the link.
+   */
+  const upIds = new Map<
+    string,
+    { ref: string; kind: string; gated?: boolean }
+  >();
   /** Agents the hub refused to register (rate_limited), each with its retry timer. */
   const limited = new Map<string, NodeJS.Timeout>();
   /** The cap each refused agent hit. */
@@ -272,10 +296,104 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
    */
   const asPi = new Set<string>();
   const asPiLogged = new Set<string>();
-  const announceUp = (rec: AgentRecord) => {
-    const id = frameId();
+  let hubEver = false;
+  let hubDroppedAt: number | undefined;
+  /**
+   * Where the daemon's own state files go: under `~/.openbus` for an install,
+   * and beside the sent file when a caller redirects that one — the tests and
+   * the e2e harness pin every file a daemon writes with those seams, and a
+   * second home would put a write outside the home they watch.
+   */
+  const stateDir = () => (deps.sentFile ? dirname(deps.sentFile) : home());
+
+  /**
+   * The hub's version, from its last hello_ok (status says when it is newer,
+   * C26h) and kept on disk across a restart: #393's gate reads it, and the
+   * link's first `agent_up` replay happens before this link's hello_ok.
+   */
+  const hubGate = new HubGate(
+    deps.hubVersionFile ?? join(stateDir(), "hub-version.json"),
+    { log },
+  );
+  /** Names a `rename` chose, per agent_ref: a restart proposes them, not the harness's name (#430). */
+  const chosen = new ChosenNames(
+    deps.namesFile ?? join(stateDir(), "names.json"),
+    { log },
+  );
+  const version = deps.version ?? process.env.OPENBUS_VERSION ?? "0.0.0";
+
+  /**
+   * The `agent` frame's content, as `self` answers it: a rename's caller
+   * learns its new name this way.
+   */
+  const agentInfo = (rec: AgentRecord) => ({
+    type: "agent" as const,
+    agent: {
+      name: rec.busName,
+      namespace: rec.namespace,
+      kind: rec.kind,
+      live: rec.live,
+      global: rec.global,
+    },
+    daemon_version: version,
+  });
+
+  /** The agent's persistent links (Pi/omp) that read `renamed` (#393): at or above the gate only. */
+  const pushRename = (rec: AgentRecord, name: string, former?: string) => {
+    const links = piLinks.get(rec.ref);
+    if (!links) return;
+    for (const [hello, push] of links) {
+      if (!seesRename(hello.client_version)) continue;
+      push({
+        v: 1,
+        id: frameId(),
+        type: "renamed",
+        name,
+        ...(former === undefined ? {} : { former }),
+      });
+    }
+  };
+
+  /**
+   * Renames (#393): the harness edge, the `rename` tool, and the hub's answers
+   * to both. Its own state is `harnessName` apart from `proposedName`.
+   */
+  const renames = new Renames({
+    agents,
+    gated: () => hubGate.gated,
+    open: () => hub.open,
+    sendRename: (rec, id) =>
+      hub.send({
+        v: 1,
+        id,
+        type: "rename",
+        agent_ref: rec.ref,
+        proposed_name: fitName(rec.proposedName, 256),
+        ...(rec.nameKind === undefined ? {} : { name_kind: rec.nameKind }),
+      }),
+    sendUp: (rec: AgentRecord, id: string): boolean => announceUp(rec, id),
+    info: agentInfo,
+    push: pushRename,
+    remember: (rec, name) => chosen.set(rec.ref, name),
+    forget: (rec) => chosen.delete(rec.ref),
+    log,
+  });
+
+  /**
+   * Announces (or re-announces) an agent, under `id` when a rename waits on
+   * its answer. `name_kind` goes only to a hub at or above the rename gate
+   * (#393): an older hub refuses the unknown key. The gate is remembered
+   * across links and restarts (`HubGate`), so the replay `onOpen` sends before
+   * this link's `hello_ok` still says whose name it is (#430).
+   */
+  const announceUp = (rec: AgentRecord, id = frameId()): boolean => {
     const kind = asPi.has(rec.kind) ? "pi" : rec.kind;
-    upIds.set(id, { ref: rec.ref, kind });
+    const nameKind = renames.gated ? rec.nameKind : undefined;
+    upIds.set(id, {
+      ref: rec.ref,
+      kind,
+      ...(nameKind === undefined ? {} : { gated: true }),
+    });
     return hub.send({
       v: 1,
       id,
@@ -285,6 +403,7 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
       proposed_name: fitName(rec.proposedName, 64),
       namespace: rec.namespace,
       global: rec.global,
+      ...(nameKind === undefined ? {} : { name_kind: nameKind }),
     });
   };
   /** Never a loop: one retry after a long wait; a reconnect replays it sooner. */
@@ -548,6 +667,8 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
         // `claude --resume` brings the same session back under a new pid; while
         // the current one still runs it stays, so two files never flap.
         if (!livePid(s.ref, prev.pid)) prev.pid = s.pid;
+        // Claude's `/rename` writes the session file; a changed name is a rename (#393).
+        renames.harness(prev, s.name);
         continue;
       }
       // Closed by a failed delivery and still the same process.
@@ -560,11 +681,22 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
         continue;
       }
       if (!WireNamespaceSchema.safeParse(ns.namespace).success) continue;
+      // A restarted session (same ref, new pid) has no name in its fresh file
+      // yet. Proposing the pid default would rename it; propose what it had.
+      const unnamed = nameKindOf("claude-code", s.name) === "default";
+      // A name a `rename` chose outlives a daemon restart (#430).
+      const remembered = chosen.get(s.ref);
+      const proposal = remembered ?? (unnamed && prev ? prev.busName : s.name);
       announceUp(
         agents.up({
           ref: s.ref,
           kind: "claude-code",
-          proposedName: s.name,
+          proposedName: proposal,
+          nameKind:
+            remembered === undefined
+              ? nameKindOf("claude-code", proposal)
+              : "chosen",
+          harnessName: s.name,
           busName: prev?.busName ?? s.name,
           namespace: ns.namespace,
           global: ns.global,
@@ -585,6 +717,18 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
     if (closed) announceSessions();
   };
 
+  /**
+   * Claude's session file is authoritative for its name (#393). Each hello is
+   * answered with a fresh read of it: a session resumed with a custom title
+   * comes up as Claude's default name, and the file's later `name` is an edge
+   * (one rename) only when it differs from the last value seen.
+   */
+  const rereadClaudeName = (ref: string) => {
+    const rec = agents.byRef(ref);
+    if (!rec) return;
+    renames.harness(rec, claudeSessionName(ref, claudeSessions));
+  };
+
   /** Open at the last tick: a session reopens only when a TUI newly lists it. */
   let openBefore = new Set<string>();
   /**
@@ -596,6 +740,9 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
     let closed = false;
     for (const a of agents.all()) {
       if (a.kind !== "opencode") continue;
+      // No title source here: the adapter's hello carries `nameOf(title)`, and
+      // two sources for one name flap (a raw title vs its slug). R393d adds
+      // the title to the hello, not to the presence file.
       if (a.live && !open.has(a.ref)) {
         a.live = false;
         closed = true;
@@ -625,10 +772,6 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
     log,
   });
 
-  let hubEver = false;
-  let hubDroppedAt: number | undefined;
-  /** The hub's version from its last hello_ok: status says when it is newer (C26h). */
-  let hubVersion: string | undefined;
   const hub = new HubConnection({
     url: `${cfg.hub.replace(/^http/, "ws").replace(/\/$/, "")}/hub`,
     token: cfg.machine_token,
@@ -654,6 +797,12 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
           if (agent) agent.busName = frame.bus_name;
           // Registered on this link: its sends lost to the last one go again.
           resends.up(frame.agent_ref);
+          // A rename re-sent as `agent_up` is answered here, with no `former`.
+          renames.renamed(frame);
+          return;
+        }
+        case "renamed": {
+          renames.renamed(frame);
           return;
         }
         case "receipt": {
@@ -703,6 +852,22 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
           upIds.delete(frame.id);
           if (up !== undefined) {
             const upRef = up.ref;
+            // The `agent_up` a rename was re-sent as: its caller hears the refusal.
+            if (renames.error(frame)) return;
+            // A hub older than the version remembered for it cannot read
+            // `name_kind`: the announce goes again without it, once, and the
+            // record (memory and disk) now says the hub is below the gate.
+            if (frame.code === "bad_frame" && up.gated) {
+              hubGate.refused();
+              const rec = agents.byRef(upRef);
+              if (rec?.live && hub.open) {
+                log(
+                  `the hub does not read name_kind; ${upRef} registers again without it`,
+                );
+                announceUp(rec);
+              }
+              return;
+            }
             if (
               frame.code === "bad_frame" &&
               !(PRE_TOKEN_KINDS as readonly string[]).includes(up.kind)
@@ -722,6 +887,8 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
             else log(`the hub refused to register ${upRef}: ${frame.code}`);
             return;
           }
+          // A rename frame's refusal, or the hub that cannot read one.
+          if (renames.error(frame)) return;
           // A resend the hub is too busy for goes again within its window.
           if (frame.code === "rate_limited" && resends.limited(frame.id))
             return;
@@ -748,7 +915,7 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
           return;
         case "hello_ok":
           // The machine id and label are already in machine.json.
-          hubVersion = frame.server_version;
+          hubGate.saw(frame.server_version);
           return;
         // roster_changed has no local consumer yet (C6).
       }
@@ -797,9 +964,13 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
       // Failed retries close too: keep the first drop of this outage.
       if (hubEver) hubDroppedAt ??= Date.now();
       upIds.clear();
-      // The next link's hello_ok says again which hub this is.
-      hubVersion = undefined;
+      // Only this link's version goes; the gate keeps the last one, because
+      // the link that comes back replays agent_up before its own hello_ok and
+      // a replay without `name_kind` would have the hub reserve a default
+      // name (#430). Its own hello_ok corrects it.
+      hubGate.dropped();
       card.dropped();
+      renames.dropped();
       receipts.release();
       // A send not yet answered waits for the next link; anything else fails now.
       resends.dropped();
@@ -815,7 +986,6 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
     },
   });
 
-  const version = deps.version ?? process.env.OPENBUS_VERSION ?? "0.0.0";
   const card = new AgentCard({
     send: (f, onUnsent) => hub.send(f, onUnsent),
     cancel: (id) => hub.cancel(id),
@@ -900,6 +1070,11 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
                   a.machine_label ??
                   (mine.get(a.name) === a.kind ? cfg.label : ""),
                 state: a.state ?? ("live" as const),
+                // Former names (#393): `status` shows the newest as "(was x)".
+                // The IPC server strips them below the client gate.
+                ...(a.former_names === undefined
+                  ? {}
+                  : { former_names: a.former_names }),
                 // Agent card (AC5c); the IPC server strips them below the gate.
                 ...(a.status === undefined ? {} : { status: a.status }),
                 ...(a.status_label === undefined
@@ -928,7 +1103,9 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
         ...(hub.open || !hubEver || hubDroppedAt === undefined
           ? {}
           : { hub_since: hubDroppedAt }),
-        ...(hubVersion === undefined ? {} : { hub_version: hubVersion }),
+        ...(hubGate.linkVersion === undefined
+          ? {}
+          : { hub_version: hubGate.linkVersion }),
         ...(only === undefined ? {} : { namespace: only }),
         namespaces,
         // Read-only: status never marks a late delivery shown.
@@ -1022,6 +1199,11 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
           // The same session reconnecting keeps its record: never re-homed.
           attested(pid);
           conns.set(prev.ref, (conns.get(prev.ref) ?? 0) + 1);
+          // A hello carries the name the adapter last read (#393). Claude's own
+          // file is read after the welcome instead: the adapter's copy can be
+          // the stale default a resumed session came up with.
+          if (prev.kind !== "claude-code")
+            renames.harness(prev, hello.proposed_name);
           // Pi is told on its connection, which exists only once welcomed (onOpen).
           if (!piLike(hello.kind)) tellOwed(prev.ref);
           return {
@@ -1045,11 +1227,21 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
             error: `namespace is not valid on the wire: ${ns.namespace}`,
           };
         attested(pid);
-        const proposedName = hello.proposed_name ?? hello.agent_ref;
+        // A name a `rename` chose outlives a daemon restart (#430): it is
+        // proposed in preference to the harness's, so a restart neither renames
+        // the agent back nor leaves the tool's name reserved for the hour.
+        const remembered = chosen.get(hello.agent_ref);
+        const proposedName =
+          remembered ?? hello.proposed_name ?? hello.agent_ref;
         const rec = agents.up({
           ref: hello.agent_ref,
           kind: hello.kind,
           proposedName,
+          nameKind:
+            remembered === undefined
+              ? nameKindOf(hello.kind, proposedName)
+              : "chosen",
+          harnessName: hello.proposed_name,
           busName: prev?.busName ?? proposedName,
           namespace: ns.namespace,
           global: ns.global,
@@ -1106,8 +1298,8 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
             !me ||
             !offersCard(version) ||
             !hub.open ||
-            hubVersion === undefined ||
-            hubTooOld(hubVersion)
+            hubGate.linkVersion === undefined ||
+            hubTooOld(hubGate.linkVersion)
           )
             return undefined;
           return hubRoster(ref).then((rows) =>
@@ -1116,17 +1308,33 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
             ),
           );
         },
-        // Offered only from the gate on; a hub below it is told apart from one that is down.
+        // Offered only from a daemon at the rename gate on (#393): an older
+        // daemon refuses the frame as bad_frame, so an adapter offers the tool
+        // only where `daemon_version` says so.
+        rename: offersRename(version)
+          ? (agent, name, reply) => {
+              // Below the gate the rename still works, as a re-sent `agent_up`:
+              // only a closed link refuses it.
+              if (!hub.open)
+                return reply({
+                  type: "error",
+                  code: "hub_unavailable",
+                  message: "the hub is not connected",
+                });
+              renames.request(agent, name, reply);
+            }
+          : undefined,
+        // Offered only from the card gate on; a hub below it is told apart from one that is down.
         card: offersCard(version)
           ? (f, ref, reply) => {
               // Open but no hello_ok yet: the hub's version is not known.
-              if (!hub.open || hubVersion === undefined)
+              if (!hub.open || hubGate.linkVersion === undefined)
                 return {
                   type: "error",
                   code: "hub_unavailable",
                   message: CARD_COPY.hub_unavailable,
                 };
-              if (hubTooOld(hubVersion))
+              if (hubTooOld(hubGate.linkVersion))
                 return {
                   type: "error",
                   code: "hub_outdated",
@@ -1154,6 +1362,10 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
       return undefined;
     },
     onOpen: (hello, push) => {
+      // Read Claude's session file again, now that the hello is answered (#393):
+      // a session resumed with a custom title comes up as Claude's default
+      // name, and only the file knows better.
+      if (hello.kind === "claude-code") rereadClaudeName(hello.agent_ref);
       if (!piLike(hello.kind)) return;
       const links = piLinks.get(hello.agent_ref) ?? new Map();
       links.set(hello, push);

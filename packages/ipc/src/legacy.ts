@@ -1,4 +1,8 @@
-import { AGENT_CARD_MIN_CLIENT, semverGte } from "@ob/shared";
+import {
+  AGENT_CARD_MIN_CLIENT,
+  RENAME_MIN_CLIENT,
+  semverGte,
+} from "@ob/shared";
 import type { z } from "zod";
 import type { AgentInfo, DaemonFrame } from "./frames.ts";
 
@@ -81,12 +85,64 @@ export const seesCard = (clientVersion: string | undefined): boolean =>
   clientVersion !== undefined &&
   semverGte(clientVersion, AGENT_CARD_MIN_CLIENT);
 
+/**
+ * Whether a client's IPC marker is at or above the rename gate (#393): it
+ * decodes `former_names`, a former-name receipt `to_name` and the `renamed`
+ * push, and its adapter offers the `rename` tool. Absent is a 0.44.x client.
+ */
+export const seesRename = (clientVersion: string | undefined): boolean =>
+  clientVersion !== undefined && semverGte(clientVersion, RENAME_MIN_CLIENT);
+
+/**
+ * Whether the daemon an adapter talks to takes the `rename` frame (#393),
+ * from the `daemon_version` its `agent` answer carries: the same gate as an
+ * adapter's IPC marker, because one release carries the frame and the copy
+ * that goes with it. Unknown (no answer yet, or a daemon that predates the
+ * field) is below the gate.
+ */
+export const daemonRenames = (daemonVersion: string | undefined): boolean =>
+  seesRename(daemonVersion);
+
+/**
+ * A daemon frame as a client below RENAME_MIN_CLIENT must receive it (#393):
+ * no former names on a roster, self or status row, and no former-name
+ * `to_name` on a receipt. A `renamed` push never goes to such a client at all
+ * (the daemon pushes it only to links at the gate).
+ */
+export function withoutRename<F extends DaemonFrame>(f: F): F {
+  const noFormer = <R extends { former_names?: unknown }>(row: R) => {
+    const { former_names: _f, ...rest } = row;
+    return rest as R;
+  };
+  switch (f.type) {
+    case "roster":
+      return { ...f, agents: f.agents.map(noFormer) };
+    case "agent":
+      return f.agent ? { ...f, agent: noFormer(f.agent) } : f;
+    case "status":
+      return {
+        ...f,
+        namespaces: f.namespaces.map((n) => ({
+          ...n,
+          agents: n.agents.map(noFormer),
+        })),
+      };
+    case "receipt": {
+      const { to_name: _to, ...receipt } = f;
+      return receipt as F;
+    }
+    default:
+      return f;
+  }
+}
+
 /** A daemon frame as the client with this marker (absent: 0.44.x) decodes it. */
 export function forClient<F extends DaemonFrame>(
   f: F,
   clientVersion: string | undefined,
 ): F {
-  if (seesCard(clientVersion)) return f;
-  const plain = withoutCard(f);
-  return clientVersion === undefined ? forOldClient(plain) : plain;
+  let out = f;
+  if (!seesCard(clientVersion)) out = withoutCard(out);
+  if (!seesRename(clientVersion)) out = withoutRename(out);
+  return clientVersion === undefined ? forOldClient(out) : out;
 }

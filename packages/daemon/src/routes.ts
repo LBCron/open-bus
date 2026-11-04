@@ -15,7 +15,7 @@ import {
   type ServerFrame,
 } from "@ob/shared";
 import type { z } from "zod";
-import type { AgentTable } from "./agents.ts";
+import type { AgentRecord, AgentTable } from "./agents.ts";
 import { CARD_COPY } from "./card.ts";
 import type { HubConnection } from "./hub.ts";
 import type { Timer } from "./sent.ts";
@@ -92,12 +92,11 @@ export class Pending {
       return ok !== false;
     }
     // The hub's roster names agents `bus_name`; adapters see `name`, `state` and `live`.
-    // A `role` from an old hub is dropped, and so is a receipt's `to_name`: it
-    // names a role's holder, and roles are gone (#394).
-    if (frame.type === "receipt") {
-      const { to_name: _to, ...receipt } = frame;
-      return w.reply({ ...receipt, id: w.localId }) !== false;
-    }
+    // A receipt's `to_name` is the target's current name when the send resolved
+    // through a former one (#393); the IPC server strips it below the client
+    // gate (legacy.ts), as it does former names.
+    if (frame.type === "receipt")
+      return w.reply({ ...frame, id: w.localId }) !== false;
     const ok = w.reply(
       frame.type === "roster"
         ? {
@@ -199,6 +198,12 @@ export type RouteCtx = {
    * when it does not answer.
    */
   ownRow?: (ref: string) => Promise<CardRow | undefined> | undefined;
+  /** The `rename` tool (#393); without it the frame is refused `unsupported`. */
+  rename?: (
+    agent: AgentRecord,
+    name: string,
+    reply: (f: Unframed) => unknown,
+  ) => void;
 };
 
 /** The agent card fields of a roster row. */
@@ -264,6 +269,22 @@ export function routeLocal(
         code: "unauthorized",
         message: "not a delivery to this agent",
       };
+    case "rename": {
+      // Answered later: by `agent` once the hub has the name, or by `error`.
+      const cap = ctx.limited?.(ref);
+      if (cap)
+        return { type: "error", code: "rate_limited", message: CAP_COPY[cap] };
+      if (!ctx.rename)
+        return {
+          type: "error",
+          code: "unsupported",
+          message: "this daemon cannot rename an agent",
+        };
+      ctx.rename(agent, frame.name, (f) =>
+        reply({ ...f, v: 1, id: frame.id } as DaemonFrame),
+      );
+      return undefined;
+    }
     case "set_status":
     case "card": {
       const cap = ctx.limited?.(ref);
