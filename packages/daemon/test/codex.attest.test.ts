@@ -867,7 +867,7 @@ describe("codex code-mode attestation (C27)", () => {
     ).toEqual(no);
   });
 
-  it("refuses a missing item id or turn, an odd call id, or a non-exec item", async () => {
+  it("refuses a missing turn, an odd call id, or a non-exec item", async () => {
     const { home } = codexHome({
       thread: CM_THREAD,
       rollout:
@@ -879,7 +879,6 @@ describe("codex code-mode attestation (C27)", () => {
     });
     const check = codexAttestor({ home, ...fakeProcs() });
     for (const h of [
-      codeHello({ item_id: undefined }),
       codeHello({ turn_id: undefined }),
       codeHello({ call_id: "call_exec1" }),
       codeHello({ call_id: "exec-XYZ" }),
@@ -890,6 +889,53 @@ describe("codex code-mode attestation (C27)", () => {
       expect(check.attestNow(h)).toEqual(no);
     // None of those spent the exec.
     expect(check.attestNow(codeHello())).toEqual(ok);
+  });
+
+  it("tells an adapter from before C27a, which sends no item id, to restart Codex (C27k)", async () => {
+    const stale = { ok: false, reason: CODEX_REFUSALS.staleAdapter };
+    expect(CODEX_REFUSALS.staleAdapter).toBe(
+      "its OpenBus server is older than the daemon. Ask the user to restart the Codex app.",
+    );
+    const { home } = cmHome();
+    const sleep = vi.fn(async () => {});
+    const check = codexAttestor({ home, ...fakeProcs(), sleep });
+    // A real pre-C27a adapter sent neither an item id nor a turn id.
+    const staleHello = codeHello({ item_id: undefined, turn_id: undefined });
+    expect(check.attestNow(staleHello)).toEqual(stale);
+    expect(check.attestNow(codeHello({ item_id: undefined }))).toEqual(stale);
+    // No wait: no item id ever lands.
+    expect(await check.attest(staleHello)).toEqual(stale);
+    expect(sleep).not.toHaveBeenCalled();
+    // Nothing was admitted or spent: the same call with its item id still is.
+    expect(check.attestNow(codeHello())).toEqual(ok);
+  });
+
+  it("tells only an adapter older than 0.61.1 (or with no marker) to restart; a newer one is refused as before (C27k)", async () => {
+    const { home } = cmHome();
+    const check = codexAttestor({ home, ...fakeProcs() });
+    const as = (client_version: string | undefined) =>
+      check.attestNow(
+        codexHello(
+          { thread_id: CM_THREAD, call_id: EXEC1, turn_id: TURN },
+          { agent_ref: CM_THREAD, client_version },
+        ),
+      );
+    for (const v of [undefined, "0.61.0", "0.45.0", "0.61.1-rc.1", "0.0.0"])
+      expect(as(v), String(v)).toEqual({
+        ok: false,
+        reason: CODEX_REFUSALS.staleAdapter,
+      });
+    for (const v of ["0.61.1", "0.62.0", "1.0.0", "not-a-version"])
+      expect(as(v), v).toEqual(no);
+    // Nothing was admitted or spent.
+    expect(check.attestNow(codeHello())).toEqual(ok);
+  });
+
+  it("keeps a function_call id with no item id as before (C27k)", async () => {
+    const { home } = codexHome();
+    const check = codexAttestor({ home, ...fakeProcs(), retryMs: 0 });
+    expect(check.attestNow(codexHello({ call_id: "call_nope" }))).toEqual(no);
+    expect(check.attestNow(codexHello())).toEqual(ok);
   });
 
   it("keeps the function_call rule first: an item id changes nothing there", async () => {

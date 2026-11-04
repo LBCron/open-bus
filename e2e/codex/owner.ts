@@ -2,23 +2,11 @@
 // and writes with a real session cookie (dev-login on the loopback hub), the
 // hub's JWKS, and a card checked the way a verifier checks it.
 import { createPublicKey, type JsonWebKey, verify } from "node:crypto";
-import {
-  AgentsResponseSchema,
-  AUTH,
-  CARD_TYP,
-  CSRF_HEADER,
-  R,
-} from "@ob/shared";
+import { AgentsResponseSchema, AUTH, CARD_TYP, R } from "@ob/shared";
 
 export type Owner = {
   /** The roster as the dashboard reads it, for one namespace. */
   agents: (namespace: string) => Promise<OwnerAgent[]>;
-  /** PUT /api/v1/roles/{ns}/{role}, with the cookie, CSRF and Origin: its status. */
-  putRole: (
-    namespace: string,
-    role: string,
-    agentId: string,
-  ) => Promise<number>;
 };
 export type OwnerAgent = ReturnType<
   typeof AgentsResponseSchema.parse
@@ -40,20 +28,6 @@ export async function ownerSession(hub: string): Promise<Owner> {
       );
       if (r.status !== 200) throw new Error(`agents: ${r.status}`);
       return AgentsResponseSchema.parse(await r.json()).agents;
-    },
-    putRole: async (namespace, role, agentId) => {
-      const r = await fetch(`${hub}${R.roles}/${namespace}/${role}`, {
-        method: "PUT",
-        headers: {
-          cookie,
-          origin: hub,
-          [CSRF_HEADER]: "1",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ agentId }),
-      });
-      await r.body?.cancel();
-      return r.status;
     },
   };
 }
