@@ -1,8 +1,9 @@
 // The Codex mode (C26b): a fake MCP client sends probe-shaped `_meta` to a fake daemon.
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
@@ -21,6 +22,7 @@ import {
   SUBAGENT_REFUSAL,
   TURN_META,
 } from "../src/codex.ts";
+import type { CodexNameDeps } from "../src/codex-name.ts";
 import { sessionHello } from "../src/session.ts";
 import { TOOLS } from "../src/tools.ts";
 
@@ -74,11 +76,12 @@ async function fakeDaemon(refuse?: string) {
   return { path, hellos };
 }
 
-async function codex(path: string) {
+async function codex(path: string, name?: CodexNameDeps) {
   const server = codexServer({
     connect: (hello) => connectDaemon({ path, hello }),
     pid: 4321,
     ppid: 4000,
+    ...(name ? { name } : {}),
   });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await server.connect(a);
@@ -361,6 +364,80 @@ describe("the codex MCP adapter", () => {
     );
     expect(h.kind).toBe("claude-code");
     expect(h).not.toHaveProperty("codex");
+  });
+});
+
+describe("the codex thread name on the bus (#393e)", () => {
+  /**
+   * A temp CODEX_HOME with Codex's `threads` table, writer left open: the
+   * name is then only in the WAL, as it is on a live thread.
+   */
+  function codexStateDb(name: string | null): {
+    home: string;
+    db: DatabaseSync;
+  } {
+    const home = mkdtempSync(join(tmpdir(), "ob-codex-state-"));
+    writeFileSync(join(home, "config.toml"), "");
+    const db = new DatabaseSync(join(home, "state_5.sqlite"));
+    db.exec("PRAGMA journal_mode = WAL");
+    db.exec(
+      "CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, name TEXT)",
+    );
+    db.prepare("INSERT INTO threads VALUES (?, '', ?)").run(THREAD, name);
+    return { home, db };
+  }
+
+  it("follows a /rename in Codex: the next hello proposes `threads.name`", async () => {
+    const { home, db } = codexStateDb("ob-manager");
+    const d = await fakeDaemon();
+    const { call } = await codex(d.path, { home });
+    expect((await call(meta({ call: "call_a" }))).isError).toBeFalsy();
+    expect(d.hellos.map((h) => h.proposed_name)).toEqual(["ob-manager"]);
+    // A `/rename` (thread/name/set) lands in the db; the next call is the edge.
+    db.prepare("UPDATE threads SET name = ? WHERE id = ?").run(
+      "ob-manager-2",
+      THREAD,
+    );
+    expect((await call(meta({ call: "call_b" }))).isError).toBeFalsy();
+    expect(d.hellos.map((h) => h.proposed_name)).toEqual([
+      "ob-manager",
+      "ob-manager-2",
+    ]);
+    db.close();
+  });
+
+  it.each<[string, () => string]>([
+    ["no name", () => codexStateDb(null).home],
+    ["no db at all", () => mkdtempSync(join(tmpdir(), "ob-codex-state-none-"))],
+  ])("with %s the hello still proposes `codex`", async (_, home) => {
+    const d = await fakeDaemon();
+    const { call } = await codex(d.path, { home: home() });
+    expect((await call(meta())).isError).toBeFalsy();
+    expect(d.hellos.map((h) => h.proposed_name)).toEqual(["codex"]);
+  });
+
+  it("with no node:sqlite the hello still proposes `codex`", async () => {
+    const { home, db } = codexStateDb("ob-manager");
+    const d = await fakeDaemon();
+    const { call } = await codex(d.path, { home, load: () => undefined });
+    expect((await call(meta())).isError).toBeFalsy();
+    expect(d.hellos.map((h) => h.proposed_name)).toEqual(["codex"]);
+    db.close();
+  });
+
+  it("a locked db is a miss: the call is served, named `codex`", async () => {
+    const home = mkdtempSync(join(tmpdir(), "ob-codex-state-locked-"));
+    const writer = new DatabaseSync(join(home, "state_5.sqlite"));
+    writer.exec("PRAGMA journal_mode = DELETE");
+    writer.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT)");
+    writer.prepare("INSERT INTO threads VALUES (?, 'ob-manager')").run(THREAD);
+    writer.exec("BEGIN EXCLUSIVE");
+    const d = await fakeDaemon();
+    const { call } = await codex(d.path, { home, timeoutMs: 20 });
+    expect((await call(meta())).isError).toBeFalsy();
+    expect(d.hellos.map((h) => h.proposed_name)).toEqual(["codex"]);
+    writer.exec("ROLLBACK");
+    writer.close();
   });
 });
 
