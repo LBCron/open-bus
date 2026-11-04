@@ -1,5 +1,7 @@
 import {
   BAD_NS_CHARS,
+  candidateName,
+  FormerNamesSchema,
   LIMITS,
   type ReceiptReason,
   type ReceiptState,
@@ -8,6 +10,8 @@ import {
 /** One terminal line at most; the transcript's "cutting long values" rule. */
 const MAX_COLS = 80;
 const HOUR = `${LIMITS.mailTtlSec / 3600} hour`;
+/** How long a former name still reaches its agent (#393): the hub's grace. */
+const GRACE = `${LIMITS.formerNameGraceMs / 3_600_000} hour`;
 const MB = `${LIMITS.maxMessageBytes / (1024 * 1024)} MB`;
 
 /**
@@ -25,6 +29,32 @@ function fitLine(text: (value: string) => string, value: string): string {
     `${value.slice(0, head)}…${value.slice(value.length - (keep - head))}`,
   );
 }
+
+/**
+ * A bus name as every reader shows it (#393): the hub slugs names, so this
+ * only removes what a terminal would obey, invisible characters, and folds
+ * whitespace; a hub name is already at most 64 characters.
+ */
+const displayName = (name: string): string =>
+  [
+    ...stripTerminalControls(name)
+      .replace(INVISIBLES, "")
+      .replace(/\s+/g, " ")
+      .trim(),
+  ]
+    .slice(0, LIMITS.maxBusNameChars)
+    .join("");
+
+/**
+ * A row's former names (#393) as they may be shown: `self` and `list_agents`
+ * read them, so one bad row is dropped rather than failing the whole result.
+ */
+const formerNamesOf = (
+  value: unknown,
+): { name: string; expires_at: string }[] => {
+  const parsed = FormerNamesSchema.safeParse(value);
+  return parsed.success ? parsed.data : [];
+};
 
 /** What went wrong and what to do, after the quoted message; `closed` has only the advice. */
 const refusals: Record<
@@ -81,31 +111,36 @@ const quoted = (head: string, quote: string, tail: string): string => {
  * verbatim, uncoloured (the glyph carries the state). `namespaces` is how many
  * namespaces hold `to`, for `ambiguous`. `excerpt` (from `excerptOf`) is the
  * message an expired or refused notice is about; without it the quote is left
- * out.
+ * out. A receipt that resolved through a former name carries `to_name` (#393):
+ * the target is then shown as "<current> (formerly <asked>)".
  */
 export function receiptText(
-  r: { state: ReceiptState; reason?: ReceiptReason },
+  r: { state: ReceiptState; reason?: ReceiptReason; to_name?: string },
   to: string,
   namespaces?: number,
   excerpt?: string,
 ): string {
   const quote = excerpt ? `"${excerpt}"` : undefined;
+  const target =
+    r.to_name !== undefined && r.to_name !== to
+      ? `${displayName(r.to_name)} (formerly ${to})`
+      : to;
   switch (r.state) {
     case "pending":
       return fitLine(
         (v) => `○  Queued for ${v}. Not delivered yet; expires in ${HOUR}.`,
-        to,
+        target,
       );
     case "delivered":
-      return fitLine((v) => `✓  Delivered to ${v}.`, to);
+      return fitLine((v) => `✓  Delivered to ${v}.`, target);
     case "expired": {
       const tail = (v: string) =>
         r.reason === "recipient_closed"
           ? `was not delivered because ${v} closed first.`
           : `was not taken within ${HOUR}.`;
       const head = (v: string) => `×  Expired: your message to ${v}`;
-      if (!quote) return fitLine((v) => `${head(v)} ${tail(v)}`, to);
-      return fitLine((v) => quoted(head(v), quote, tail(v)), to);
+      if (!quote) return fitLine((v) => `${head(v)} ${tail(v)}`, target);
+      return fitLine((v) => quoted(head(v), quote, tail(v)), target);
     }
     case "refused": {
       // A `role_vacant` from a pre-#394 hub is not in the reason list any more
@@ -129,7 +164,7 @@ export function receiptText(
           ...(said(v) ? [`   ${said(v)}`] : []),
           `   ${hint}`,
         ].join("\n");
-      return fitLine(lines, to);
+      return fitLine(lines, target);
     }
   }
 }
@@ -392,6 +427,7 @@ export function statusSaysText(
 
 /**
  * One `list_agents` line (AC5c): the name, then the status after two spaces.
+ * A row with former names (#393) shows the newest as "(was x)".
  */
 export function rosterLine(
   a: CardFields & {
@@ -400,16 +436,48 @@ export function rosterLine(
     namespace: string;
     machine_label?: unknown;
     queued: boolean;
+    former_names?: unknown;
   },
   now = Date.now(),
 ): string {
   const says = statusSaysText(a, now);
-  return `- ${a.name} (${displayKind(a.kind)}, ${a.namespace}${typeof a.machine_label === "string" && a.machine_label ? `, ${a.machine_label}` : ""})${a.queued ? " (queued)" : ""}${says ? `  ${says}` : ""}`;
+  const [former] = formerNamesOf(a.former_names);
+  const was =
+    former && former.name !== a.name
+      ? ` (was ${displayName(former.name)})`
+      : "";
+  return `- ${a.name}${was} (${displayKind(a.kind)}, ${a.namespace}${typeof a.machine_label === "string" && a.machine_label ? `, ${a.machine_label}` : ""})${a.queued ? " (queued)" : ""}${says ? `  ${says}` : ""}`;
+}
+
+/** When a former name stops reaching the agent: `2026-11-04 13:00 UTC`, or as sent when unparsable. */
+export const untilText = (expiresAt: string): string => {
+  const at = Date.parse(expiresAt);
+  if (Number.isNaN(at)) return displayName(expiresAt);
+  return `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+};
+
+/**
+ * The `self` result's former names (#393), one line each so a long list stays
+ * inside the 80-column rule: `Former names: lane-6 (until 2026-11-04 13:00 UTC)`.
+ */
+export function formerNamesText(
+  former: { name: string; expires_at: string }[],
+): string {
+  return former
+    .map((f, i) =>
+      fitLine(
+        (v) =>
+          `${i === 0 ? "Former names: " : "   "}${v} (until ${untilText(f.expires_at)})`,
+        displayName(f.name),
+      ),
+    )
+    .join("\n");
 }
 
 /**
  * The `self` result (AC5c): the agent entry, its hub-supplied card fields
- * cleaned as list_agents shows them.
+ * cleaned as list_agents shows them, then the names it left that still reach
+ * it (#393), one per line.
  */
 export function selfText(
   agent: (CardFields & Record<string, unknown>) | null,
@@ -421,6 +489,7 @@ export function selfText(
     status: _s,
     status_label: _l,
     status_at: _a,
+    former_names: _f,
     ...rest
   } = agent;
   const label =
@@ -438,5 +507,66 @@ export function selfText(
       ? { status_at: agent.status_at }
       : {}),
   };
-  return JSON.stringify(shown, null, 2);
+  const former = formerNamesOf(agent.former_names);
+  const out = JSON.stringify(shown, null, 2);
+  return former.length ? `${out}\n\n${formerNamesText(former)}` : out;
 }
+
+/**
+ * The `rename` tool's copy (#393; Design's draft): the tool, its argument, and
+ * every result line. The OK line names the name it left and how long it still
+ * reaches it; the taken line names what was asked for.
+ */
+export const RENAME_COPY = {
+  description:
+    "Change your bus name. Agents reach you by the new name; your old name keeps working for 1 hour.",
+  name_arg: "Your new name: lowercase words joined by `-`.",
+  /** The hub caps renames per hour; the daemon's own message is pinned (`RENAME_MESSAGES.rate`). */
+  rate_limited: "Too many renames. Try again in a few minutes.",
+} as const;
+
+/**
+ * A `rename` result (#393), from the daemon's `agent` answer.
+ * `asked` is what the caller said, `name` is the name it has now, and `before`
+ * is the name it had when it said hello (absent when unknown).
+ */
+export function renameText(r: {
+  asked: string;
+  name: string;
+  before?: string;
+  former_names?: unknown;
+}): string {
+  const asked = candidateName(r.asked);
+  const name = displayName(r.name);
+  if (r.before !== undefined && r.before === r.name)
+    return fitLine((v) => `You are already ${v}.`, name);
+  if (asked !== r.name)
+    return fitLine(
+      (v) => `${v} is taken, so you are now ${name}.`,
+      displayName(asked),
+    );
+  // The name it left: from the answer when the daemon says it, else the one
+  // it said hello with. The grace is a duration when no expiry came with it.
+  const [left] = formerNamesOf(r.former_names).filter((f) => f.name !== r.name);
+  const former = left
+    ? {
+        name: displayName(left.name),
+        until: `until ${untilText(left.expires_at)}`,
+      }
+    : r.before !== undefined && r.before !== r.name
+      ? { name: displayName(r.before), until: `for ${GRACE}` }
+      : undefined;
+  if (!former) return fitLine((v) => `You are now ${v} on the bus.`, name);
+  const one = `You are now ${name} on the bus. ${former.name} still reaches you ${former.until}.`;
+  // Over 80 columns, the two sentences take a line each, and a name is cut
+  // in the middle rather than the line run over.
+  if (one.length <= MAX_COLS) return one;
+  return [
+    fitLine((v) => `You are now ${v} on the bus.`, name),
+    fitLine((v) => `${v} still reaches you ${former.until}.`, former.name),
+  ].join("\n");
+}
+
+/** The `renamed` push as Pi/omp reads it (#393): the bus name changed under it. */
+export const renamedText = (name: string): string =>
+  fitLine((v) => `Your bus name is now ${v}.`, displayName(name));

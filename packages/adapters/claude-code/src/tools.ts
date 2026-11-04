@@ -3,9 +3,13 @@ import {
   CardRequest,
   cleanStatusLabel,
   type DaemonClient,
+  daemonRenames,
   earlierStatusText,
   excerptOf,
+  RENAME_COPY,
+  Rename,
   receiptText,
+  renameText,
   rosterLine,
   SetStatus,
   selfText,
@@ -100,7 +104,36 @@ export const TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "rename",
+    description: RENAME_COPY.description,
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          maxLength: 64,
+          description: RENAME_COPY.name_arg,
+        },
+      },
+      required: ["name"],
+      additionalProperties: false,
+    },
+  },
 ] as const;
+
+/**
+ * TOOLS as the daemon an adapter talks to can take them (#393): `rename` is
+ * offered only to a daemon at or above RENAME_MIN_CLIENT, from the
+ * `daemon_version` its `agent` answer carries, and hidden below it. A daemon
+ * that cannot be asked (none running, an older one) hides it too. Harnesses
+ * whose tool list cannot know the version list it anyway and answer with
+ * CARD_COPY.unsupported below the gate.
+ */
+export const offeredTools = (daemonVersion: string | undefined) =>
+  daemonRenames(daemonVersion)
+    ? [...TOOLS]
+    : TOOLS.filter((t) => t.name !== "rename");
 
 export type ToolResult = {
   content: { type: "text"; text: string }[];
@@ -139,7 +172,8 @@ export async function callTool(
     if (r.type !== "status" && "late" in r && r.late) late.push(...r.late);
     return r;
   };
-  const out = await run(name, args, request);
+  // The welcome's name is where a no-op `rename` is told from a fresh one.
+  const out = await run(name, args, request, client.welcome?.bus_name);
   if (!late.length) return out;
   const [first, ...rest] = out.content;
   return {
@@ -157,10 +191,13 @@ async function run(
   name: string,
   args: Record<string, unknown>,
   request: Request,
+  /** The name the daemon said at hello: a `rename` that lands on it is a no-op. */
+  before?: string,
 ): Promise<ToolResult> {
   try {
     if (name === "set_status" || name === "card")
       return await cardTool(name, args, request);
+    if (name === "rename") return await renameTool(args, request, before);
     if (name === "list_agents") {
       const r = await request({ type: "list" });
       if (r.type !== "roster") return failed(r);
@@ -275,6 +312,50 @@ async function cardTool(
   // connection carries one request).
   if (r.code === "bad_frame" && r.message !== CARD_COPY.bad_frame)
     return text(CARD_COPY.unsupported, true);
+  return text(r.message, true);
+}
+
+/**
+ * The `rename` tool (#393). The name is checked with the daemon's own schema
+ * first, so a bad_frame after that means the daemon predates the frame: it is
+ * then shown the "update OpenBus" copy, never an error. The answer's `agent`
+ * carries the name it actually got (the hub slugs it, and de-collides it), so
+ * the copy can say "taken" and name the former one.
+ */
+async function renameTool(
+  args: Record<string, unknown>,
+  request: Request,
+  before?: string,
+): Promise<ToolResult> {
+  const asked = typeof args.name === "string" ? args.name : "";
+  const frame = Rename.safeParse({
+    v: 1,
+    id: "0",
+    type: "rename",
+    name: asked,
+  });
+  if (!frame.success) {
+    const issue = frame.error.issues[0];
+    return text(
+      `openbus: ${String(issue?.path[0] ?? "arguments")}: ${issue?.message ?? "invalid"}`,
+      true,
+    );
+  }
+  const r = await request({ type: "rename", name: asked });
+  if (r.type === "agent" && r.agent)
+    return text(
+      renameText({
+        asked,
+        name: r.agent.name,
+        ...(before === undefined ? {} : { before }),
+        ...(r.agent.former_names === undefined
+          ? {}
+          : { former_names: r.agent.former_names }),
+      }),
+    );
+  if (r.type !== "error") return failed(r);
+  if (r.code === "rate_limited") return text(RENAME_COPY.rate_limited, true);
+  if (r.code === "bad_frame") return text(CARD_COPY.unsupported, true);
   return text(r.message, true);
 }
 

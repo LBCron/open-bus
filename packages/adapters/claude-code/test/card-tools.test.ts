@@ -36,7 +36,7 @@ const call = (
 ) => callTool(name, args, d.client);
 
 describe("set_status and card: shapes", () => {
-  it("adds both tools after the four, vendor-neutral", () => {
+  it("adds both tools after the four, and rename after them", () => {
     expect(TOOLS.map((t) => t.name)).toEqual([
       "list_agents",
       "send_message",
@@ -44,6 +44,7 @@ describe("set_status and card: shapes", () => {
       "self",
       "set_status",
       "card",
+      "rename",
     ]);
     for (const t of TOOLS) expect(t.description).not.toMatch(/claude/i);
   });

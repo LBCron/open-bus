@@ -19,6 +19,8 @@ type Ctx = {
   sessionManager: {
     getSessionId(): string;
     getSessionName?(): string | undefined;
+    /** Pi 1.4 and omp: a tool rename renames the session too, so one name is everywhere (#393). */
+    setSessionName?(name: string): void;
   };
   /**
    * omp only (Pi has none): the agent this session runs, set on every omp
@@ -82,6 +84,8 @@ const SELF_TIMEOUT_MS = 2_000;
 
 const MAX_COLS = 80;
 const HOUR = "1 hour";
+/** @ob/ipc's GRACE: how long a former name still reaches its agent (#393). */
+const GRACE = "1 hour";
 
 /**
  * Cuts `value` in the middle, keeping its end, so no line of `text(value)`
@@ -157,28 +161,33 @@ const quoted = (head: string, quote: string, tail: string): string => {
  * out.
  */
 function receiptText(
-  r: { state: string; reason?: string },
+  r: { state: string; reason?: string; to_name?: string },
   to: string,
   namespaces?: number,
   excerpt?: string,
 ): string {
   const quote = excerpt ? `"${excerpt}"` : undefined;
+  // A send that resolved through a former name (#393): both names show.
+  const target =
+    typeof r.to_name === "string" && r.to_name !== to
+      ? `${displayName(r.to_name)} (formerly ${to})`
+      : to;
   switch (r.state) {
     case "pending":
       return fitLine(
         (v) => `○  Queued for ${v}. Not delivered yet; expires in ${HOUR}.`,
-        to,
+        target,
       );
     case "delivered":
-      return fitLine((v) => `✓  Delivered to ${v}.`, to);
+      return fitLine((v) => `✓  Delivered to ${v}.`, target);
     case "expired": {
       const tail = (v: string) =>
         r.reason === "recipient_closed"
           ? `was not delivered because ${v} closed first.`
           : `was not taken within ${HOUR}.`;
       const head = (v: string) => `×  Expired: your message to ${v}`;
-      if (!quote) return fitLine((v) => `${head(v)} ${tail(v)}`, to);
-      return fitLine((v) => quoted(head(v), quote, tail(v)), to);
+      if (!quote) return fitLine((v) => `${head(v)} ${tail(v)}`, target);
+      return fitLine((v) => quoted(head(v), quote, tail(v)), target);
     }
     default: {
       // A `role_vacant` from a pre-#394 hub is not in the reason list any more
@@ -201,7 +210,7 @@ function receiptText(
           ...(said(v) ? [`   ${said(v)}`] : []),
           `   ${hint}`,
         ].join("\n");
-      return fitLine(lines, to);
+      return fitLine(lines, target);
     }
   }
 }
@@ -231,6 +240,37 @@ function cutOff(seq: string): boolean {
 
 const stripTerminalControls = (text: string): string =>
   text.replace(TERMINAL_CONTROLS, (seq) => (cutOff(seq) ? CUT_OFF : ""));
+
+/**
+ * @ob/ipc displayName: a bus name as every reader shows it, controls and
+ * invisibles out, whitespace folded, at most 64 characters.
+ */
+const displayName = (name: string): string =>
+  [
+    ...stripTerminalControls(name)
+      .replace(INVISIBLES, "")
+      .replace(/\s+/g, " ")
+      .trim(),
+  ]
+    .slice(0, 64)
+    .join("");
+
+/**
+ * @ob/shared FormerNamesSchema, as this file can check it without zod: an
+ * array of 1 to 5 entries that carry a name and an expiry. One that does not
+ * fit is dropped rather than failing the whole result.
+ */
+function formerNamesOf(value: unknown): { name: string; expires_at: string }[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 5)
+    return [];
+  const out: { name: string; expires_at: string }[] = [];
+  for (const v of value) {
+    const f = v as { name?: unknown; expires_at?: unknown } | null;
+    if (typeof f?.name === "string" && typeof f.expires_at === "string")
+      out.push({ name: f.name, expires_at: f.expires_at });
+  }
+  return out;
+}
 
 /** Zero-width and bidi characters: invisible, and able to reorder the line they sit in. */
 const INVISIBLES = /[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g;
@@ -390,7 +430,7 @@ function statusSaysText(row: CardFields, now = Date.now()): string | undefined {
   ].join(" · ");
 }
 
-/** @ob/ipc rosterLine: one list_agents line. */
+/** @ob/ipc rosterLine: one list_agents line, the newest former name as "(was x)". */
 function rosterLine(
   a: CardFields & {
     name: string;
@@ -398,14 +438,42 @@ function rosterLine(
     namespace: string;
     machine_label?: unknown;
     queued: boolean;
+    former_names?: unknown;
   },
   now = Date.now(),
 ): string {
   const says = statusSaysText(a, now);
-  return `- ${a.name} (${displayKind(a.kind)}, ${a.namespace}${typeof a.machine_label === "string" && a.machine_label ? `, ${a.machine_label}` : ""})${a.queued ? " (queued)" : ""}${says ? `  ${says}` : ""}`;
+  const [former] = formerNamesOf(a.former_names);
+  const was =
+    former && former.name !== a.name
+      ? ` (was ${displayName(former.name)})`
+      : "";
+  return `- ${a.name}${was} (${displayKind(a.kind)}, ${a.namespace}${typeof a.machine_label === "string" && a.machine_label ? `, ${a.machine_label}` : ""})${a.queued ? " (queued)" : ""}${says ? `  ${says}` : ""}`;
 }
 
-/** @ob/ipc selfText: the agent entry, card fields cleaned. */
+/** @ob/ipc untilText: when a former name stops reaching the agent. */
+const untilText = (expiresAt: string): string => {
+  const at = Date.parse(expiresAt);
+  if (Number.isNaN(at)) return displayName(expiresAt);
+  return `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+};
+
+/** @ob/ipc formerNamesText: one line per former name, inside the 80-column rule. */
+function formerNamesText(
+  former: { name: string; expires_at: string }[],
+): string {
+  return former
+    .map((f, i) =>
+      fitLine(
+        (v) =>
+          `${i === 0 ? "Former names: " : "   "}${v} (until ${untilText(f.expires_at)})`,
+        displayName(f.name),
+      ),
+    )
+    .join("\n");
+}
+
+/** @ob/ipc selfText: the agent entry, card fields cleaned, then its former names. */
 function selfText(
   agent: (CardFields & Record<string, unknown>) | null,
 ): string {
@@ -416,6 +484,7 @@ function selfText(
     status: _s,
     status_label: _l,
     status_at: _a,
+    former_names: _f,
     ...rest
   } = agent;
   const label =
@@ -433,7 +502,92 @@ function selfText(
       ? { status_at: agent.status_at }
       : {}),
   };
-  return JSON.stringify(shown, null, 2);
+  const former = formerNamesOf(agent.former_names);
+  const out = JSON.stringify(shown, null, 2);
+  return former.length ? `${out}\n\n${formerNamesText(former)}` : out;
+}
+
+/** @ob/ipc RENAME_COPY: the rename tool's copy (Design's draft, verbatim). */
+const RENAME_COPY = {
+  description:
+    "Change your bus name. Agents reach you by the new name; your old name keeps working for 1 hour.",
+  name_arg: "Your new name: lowercase words joined by `-`.",
+  rate_limited: "Too many renames. Try again in a few minutes.",
+};
+
+/** @ob/ipc renameText: the `rename` result, from the daemon's `agent` answer. */
+function renameText(r: {
+  asked: string;
+  name: string;
+  before?: string;
+  former_names?: unknown;
+}): string {
+  const asked = candidateName(r.asked);
+  const name = displayName(r.name);
+  if (r.before !== undefined && r.before === r.name)
+    return fitLine((v) => `You are already ${v}.`, name);
+  if (asked !== r.name)
+    return fitLine(
+      (v) => `${v} is taken, so you are now ${name}.`,
+      displayName(asked),
+    );
+  // The name it left: from the answer when the daemon says it, else the one
+  // it said hello with. The grace is a duration when no expiry came with it.
+  const [left] = formerNamesOf(r.former_names).filter((f) => f.name !== r.name);
+  const former = left
+    ? {
+        name: displayName(left.name),
+        until: `until ${untilText(left.expires_at)}`,
+      }
+    : r.before !== undefined && r.before !== r.name
+      ? { name: displayName(r.before), until: `for ${GRACE}` }
+      : undefined;
+  if (!former) return fitLine((v) => `You are now ${v} on the bus.`, name);
+  const one = `You are now ${name} on the bus. ${former.name} still reaches you ${former.until}.`;
+  // Over 80 columns, the two sentences take a line each.
+  if (one.length <= MAX_COLS) return one;
+  return [
+    fitLine((v) => `You are now ${v} on the bus.`, name),
+    fitLine((v) => `${v} still reaches you ${former.until}.`, former.name),
+  ].join("\n");
+}
+
+/** @ob/ipc renamedText: the `renamed` push as Pi/omp reads it. */
+const renamedText = (name: string): string =>
+  fitLine((v) => `Your bus name is now ${v}.`, displayName(name));
+
+/** @ob/shared NAME_RE and IPV4_RE: what an address-shaped or malformed name is. */
+const NAME_RE = /^[A-Za-z0-9](?:[A-Za-z0-9 ._-]{0,62}[A-Za-z0-9_-])?$/;
+const IPV4_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/;
+
+/** @ob/shared RESERVED_BUS_NAMES: the names system notices use. */
+const RESERVED = ["openbus", "open-bus"];
+
+/** @ob/shared isReservedBusName: folded, suffix-stripped, exact. */
+function isReservedName(name: string): boolean {
+  let k = name.replace(/[A-Z]/g, (c) => c.toLowerCase());
+  for (let prev = ""; prev !== k; ) {
+    prev = k;
+    k = k.replace(/(?:[ ._-]+\d+|[ ._-]+)$/, "");
+  }
+  k = k.replace(/[ ._-]/g, "");
+  return RESERVED.some((r) => r.replace(/[ ._-]/g, "") === k);
+}
+
+/** @ob/shared candidateName: a proposal made safe, or `agent` when nothing valid is left. */
+function candidateName(proposed: string): string {
+  const cleaned = proposed
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them is the point
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+    .replace(/ {2,}/g, " ")
+    .trim()
+    .slice(0, 64)
+    .replace(/[ .]+$/, "");
+  return NAME_RE.test(cleaned) &&
+    !IPV4_RE.test(cleaned) &&
+    !isReservedName(cleaned)
+    ? cleaned
+    : "agent";
 }
 
 /** @ob/shared OriginSchema: an exact https origin (http only on loopback), at most 512. */
@@ -468,6 +622,12 @@ export const copy = {
   rosterLine,
   selfText,
   receiptText,
+  RENAME_COPY,
+  renameText,
+  renamedText,
+  untilText,
+  formerNamesText,
+  candidateName,
   excerptOf,
   stripTerminalControls,
   neutralizeBody,
@@ -560,6 +720,23 @@ const TOOLS = [
         nonce: { type: "string", description: "The nonce the app gave you." },
       },
       required: ["audience", "nonce"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "rename",
+    label: "OpenBus: rename",
+    description: RENAME_COPY.description,
+    parameters: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          maxLength: 64,
+          description: RENAME_COPY.name_arg,
+        },
+      },
+      required: ["name"],
       additionalProperties: false,
     },
   },
@@ -722,6 +899,7 @@ function open(
   on: {
     deliver: (f: Frame, link: Link) => void;
     notice: (text: string, msgId?: string) => void;
+    renamed: (f: Frame, link: Link) => void;
     lost: () => void;
   },
 ): Promise<Link> {
@@ -820,6 +998,7 @@ function open(
           continue;
         }
         if (f.type === "deliver") on.deliver(f, link);
+        else if (f.type === "renamed") on.renamed(f, link);
         else if (f.type === "notice")
           on.notice(
             String(f.text ?? ""),
@@ -883,6 +1062,14 @@ export default function openbus(pi: Pi): void {
   let retry: ReturnType<typeof setTimeout> | undefined;
   /** Hellos refused in a row; a welcome resets it. */
   let refusals = 0;
+  /**
+   * The harness's own name, as a bus name, the last time it was read (#393).
+   * A change is an edge: reading the same value again (every turn, every tool
+   * call, and the write-back's own `session_info_changed`) proposes nothing.
+   */
+  let harnessName: string | undefined;
+  /** The name the bus has for this session now: the welcome's, then every rename. */
+  let busName: string | undefined;
   const shown = new Map<string, "showing" | "shown">();
 
   const show = (customType: string, content: string, details?: unknown) =>
@@ -935,6 +1122,63 @@ export default function openbus(pi: Pi): void {
     link.ack(msgId);
   };
 
+  /**
+   * The agent's bus name changed (#393): a tool rename, a harness rename, or
+   * the hub de-colliding it. A rename this call already reported is its echo
+   * and names nothing new.
+   */
+  const renamed = (f: Frame, _link: Link) => {
+    const name = typeof f.name === "string" ? f.name : "";
+    if (!name || name === busName) return;
+    busName = name;
+    try {
+      show(`openbus-rename`, `[openbus] ${renamedText(name)}`, { name });
+    } catch {}
+  };
+
+  /** The harness's own name now, as a bus name: the event's `name` when it has one. */
+  const harnessNameOf = (event: unknown, ctx: Ctx): string => {
+    const named = (event as { name?: unknown } | undefined)?.name;
+    const kind = ctx.agent !== undefined ? "omp" : "pi";
+    return nameOf(
+      typeof named === "string" ? named : ctx.sessionManager.getSessionName?.(),
+      kind,
+    );
+  };
+
+  /**
+   * Tells the daemon the harness renamed the session (#393). omp has no event
+   * for it, so this is called on `turn_end` and on every tool call; Pi's
+   * `session_info_changed` calls it too. The daemon reads a change as an edge,
+   * so a repeated name costs nothing, and the write-back below fires the event
+   * with the name just set: no loop.
+   */
+  const harnessRenamed = (ctx: Ctx | undefined, event?: unknown) => {
+    if (!ctx?.sessionManager || subagent(ctx)) return;
+    const name = harnessNameOf(event, ctx);
+    if (name === harnessName) return;
+    harnessName = name;
+    if (identity) identity.name = name;
+    const link = current;
+    // No link yet: the next hello carries the name.
+    if (!link || link.closed()) return;
+    // Its answer names the same thing the push will; a refusal (an old daemon)
+    // leaves the name where it is and is told to the user by the tool.
+    void link.request({ type: "rename", name }).catch(() => {});
+  };
+
+  /**
+   * A tool rename also renames the session (#393, the user's decision): one
+   * name everywhere. `harnessName` moves with it, so the event it fires names
+   * no new edge; Claude, OpenCode and Codex get no write-back.
+   */
+  const writeBackName = (ctx: Ctx, name: string) => {
+    harnessName = name;
+    try {
+      ctx.sessionManager.setSessionName?.(name);
+    } catch {}
+  };
+
   const reconnect = (e?: unknown) => {
     if (stopped || retry || !identity) return;
     const refused = (e as { refused?: boolean } | undefined)?.refused === true;
@@ -953,6 +1197,8 @@ export default function openbus(pi: Pi): void {
     if (connecting?.ref === id.ref) return connecting.link;
     current?.close();
     current = undefined;
+    // What this hello says, before a rename can move `id.name` under it.
+    const sent = id.name;
     const link = open(id, start, {
       deliver: (f, l) => void deliver(f, l),
       notice: (text, msgId) => {
@@ -964,6 +1210,7 @@ export default function openbus(pi: Pi): void {
           );
         } catch {}
       },
+      renamed: (f, l) => renamed(f, l),
       lost: () => reconnect(),
     }).then(
       (l) => {
@@ -974,6 +1221,11 @@ export default function openbus(pi: Pi): void {
         }
         current = l;
         refusals = 0;
+        busName = String(l.welcome.bus_name ?? "");
+        // A harness rename that landed while this hello was on its way is not
+        // in it, and names no edge of its own: it is said here instead.
+        if (harnessName !== undefined && harnessName !== sent)
+          void l.request({ type: "rename", name: harnessName }).catch(() => {});
         return l;
       },
       (e: unknown) => {
@@ -1005,9 +1257,16 @@ export default function openbus(pi: Pi): void {
   pi.on("session_start", async (_event, ctx) => {
     if (subagent(ctx)) return;
     stopped = false;
+    const id = identityOf(ctx);
+    harnessName = id.name;
+    busName = undefined;
     // Pi is reachable while this link is open; a daemon that is down is retried.
-    await ensure(identityOf(ctx)).catch(reconnect);
+    await ensure(id).catch(reconnect);
   });
+  // Pi 1.4's own rename (`/rename`): the session says so, and the bus follows.
+  pi.on("session_info_changed", (event, ctx) => harnessRenamed(ctx, event));
+  // omp has no such event: its name is polled once a turn and on every tool call.
+  pi.on("turn_end", (_event, ctx) => harnessRenamed(ctx));
   pi.on("session_shutdown", (_event, ctx) => {
     if (subagent(ctx)) return;
     stopped = true;
@@ -1029,7 +1288,12 @@ export default function openbus(pi: Pi): void {
   };
 
   /** The sender is the session's attested link; a `from` argument is never read. */
-  const run = async (name: string, args: Json, link: Link): Promise<string> => {
+  const run = async (
+    name: string,
+    args: Json,
+    link: Link,
+    ctx: Ctx,
+  ): Promise<string> => {
     if (name === "list_agents") {
       const r = await link.request({ type: "list" });
       if (r.type !== "roster") failed(r);
@@ -1073,6 +1337,7 @@ export default function openbus(pi: Pi): void {
       const receipt = {
         state: String(r.state),
         reason: r.reason as string,
+        ...(typeof r.to_name === "string" ? { to_name: r.to_name } : {}),
       };
       const n =
         receipt.reason === "ambiguous"
@@ -1094,6 +1359,7 @@ export default function openbus(pi: Pi): void {
     }
     if (name === "set_status" || name === "card")
       return cardTool(name, args, link);
+    if (name === "rename") return renameTool(args, link, ctx);
     const r = await link.request({ type: "self", card: true });
     if (r.type !== "agent") failed(r);
     return selfText((r.agent ?? null) as Json | null);
@@ -1151,6 +1417,46 @@ export default function openbus(pi: Pi): void {
     return failed(r);
   };
 
+  /**
+   * The `rename` tool (#393). The daemon slugs the name and answers `agent`
+   * with the one it got, so the copy can say "taken" and name the former one.
+   * A daemon from before the frame answers bad_frame: it gets the "update
+   * OpenBus" copy, as set_status and card do.
+   */
+  const renameTool = async (
+    args: Json,
+    link: Link,
+    ctx: Ctx,
+  ): Promise<string> => {
+    const asked = typeof args.name === "string" ? args.name : "";
+    if (asked.length < 1 || asked.length > 64)
+      throw new Error("openbus: name: must be 1 to 64 characters");
+    // The name the daemon said at hello, or the last one it gave: a rename
+    // that lands on it is a no-op, and the copy says so.
+    const before = busName;
+    const r = await link.request({ type: "rename", name: asked });
+    if (r.type === "error") {
+      if (r.code === "rate_limited") throw new Error(RENAME_COPY.rate_limited);
+      if (r.code === "bad_frame") throw new Error(CARD_COPY.unsupported);
+      throw new Error(String(r.message));
+    }
+    const agent = r.agent as Json | null | undefined;
+    if (r.type !== "agent" || !agent) return failed(r);
+    const name = String(agent.name);
+    busName = name;
+    const out = renameText({
+      asked,
+      name,
+      ...(before === undefined ? {} : { before }),
+      ...(agent.former_names === undefined
+        ? {}
+        : { former_names: agent.former_names }),
+    });
+    // One name everywhere: the session follows the bus.
+    writeBackName(ctx, name);
+    return out;
+  };
+
   for (const tool of TOOLS)
     pi.registerTool({
       ...tool,
@@ -1160,6 +1466,8 @@ export default function openbus(pi: Pi): void {
           throw new Error(
             "openbus: a subagent is not on the bus; only the main omp session can use OpenBus",
           );
+        // omp has no rename event: every tool call is a chance to see one.
+        harnessRenamed(ctx);
         // A failed link is retried in the background as well.
         const link = await ensure(identityOf(ctx)).catch((e: unknown) => {
           reconnect(e);
@@ -1179,7 +1487,7 @@ export default function openbus(pi: Pi): void {
         };
         const after = (out: string) => [out, ...late].join("\n\n");
         try {
-          return text(after(await run(tool.name, params ?? {}, tracked)));
+          return text(after(await run(tool.name, params ?? {}, tracked, ctx)));
         } catch (e) {
           if (!late.length) throw e;
           throw new Error(after(e instanceof Error ? e.message : String(e)));

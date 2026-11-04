@@ -14,11 +14,15 @@ export {
   earlierStatusText,
   excerptOf,
   fitName,
+  formerNamesText,
   lateDeliveredText,
   messageHeader,
   neutralizeBody,
   oversizedText,
+  RENAME_COPY,
   receiptText,
+  renamedText,
+  renameText,
   rosterLine,
   STATUS_STALE_MS,
   selfText,
@@ -27,9 +31,11 @@ export {
   statusSetText,
   stripTerminalControls,
   unconfirmedText,
+  untilText,
 } from "./copy.ts";
 export * from "./frames.ts";
 export {
+  daemonRenames,
   forClient,
   forOldClient,
   LEGACY_KINDS,
