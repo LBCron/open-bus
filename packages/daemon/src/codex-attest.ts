@@ -12,12 +12,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
-import {
-  CLIENT_VERSION,
-  type Hello,
-  SPAWNED_SOURCES,
-  systemTool,
-} from "@ob/ipc";
+import { type Hello, SPAWNED_SOURCES, systemTool } from "@ob/ipc";
 import { semverGte } from "@ob/shared";
 import { lstartEpoch } from "./presence/opencode.ts";
 
@@ -40,25 +35,16 @@ export const CODEX_REFUSALS = {
     "its OpenBus server is older than the daemon. Ask the user to restart the Codex app.",
 } as const;
 
-const SEMVER = /^\d+\.\d+\.\d+$/;
+/** The first release whose adapter sends `item_id` (C27a). */
+const ITEM_ID_SINCE = "0.61.1";
 
 /**
- * `staleAdapter`, naming both versions when the hello's marker (C23c) shows
- * the adapter is older than the daemon (C27k). The versioned text is DRAFT.
+ * Whether the hello's marker (C23c) is from before ITEM_ID_SINCE: absent, or
+ * a release below it. A malformed one is not taken as older.
  */
-export function staleRefusal(
-  client: string | undefined,
-  daemon: string,
-): string {
-  if (
-    client === undefined ||
-    !SEMVER.test(client) ||
-    !SEMVER.test(daemon) ||
-    semverGte(client, daemon)
-  )
-    return CODEX_REFUSALS.staleAdapter;
-  return `its OpenBus server (${client}) is older than the daemon (${daemon}). Ask the user to restart the Codex app.`;
-}
+const beforeItemId = (client: string | undefined): boolean =>
+  client === undefined ||
+  (semverGte(client, "0.0.0") && !semverGte(client, ITEM_ID_SINCE));
 
 /**
  * The tool namespace Codex gives our MCP entry: `mcp__<entry name>`, so the
@@ -99,8 +85,6 @@ export type CodexAttestDeps = {
   retryMs?: number;
   /** The wait itself; default a timer, so the daemon keeps serving. */
   sleep?: (ms: number) => Promise<void>;
-  /** The daemon's version, for the stale-adapter refusal; default CLIENT_VERSION. */
-  version?: string;
 };
 
 export type CodexAttest =
@@ -207,7 +191,6 @@ export function codexAttestor(deps: CodexAttestDeps = {}): CodexAttestor {
   const procs = deps.procs ?? psRows;
   const holding = deps.holding ?? holdingFiles;
   const retryMs = deps.retryMs ?? 50;
-  const version = deps.version ?? CLIENT_VERSION;
   const sleep =
     deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   /** P's start time, pinned at its first proven hello. */
@@ -350,10 +333,14 @@ export function codexAttestor(deps: CodexAttestDeps = {}): CodexAttestor {
     // One hello per exec: a second OpenBus call in it is told to use its own.
     if (itemUsed()) return no(CODEX_REFUSALS.oneExec);
     if (execOpen(scan)) return admitExec();
-    // An exec's call with no item id: the adapter predates C27a, outliving an
-    // upgrade in a thread Codex kept open. No wait helps it.
-    if (!item && EXEC_CALL.test(cx.call_id))
-      return no(staleRefusal(hello.client_version, version));
+    // An exec's call with no item id from an adapter older than C27a: it
+    // outlived an upgrade in a thread Codex kept open. No wait helps it.
+    if (
+      !item &&
+      EXEC_CALL.test(cx.call_id) &&
+      beforeItemId(hello.client_version)
+    )
+      return no(CODEX_REFUSALS.staleAdapter);
     if (!retry || retryMs <= 0) return no(CODEX_REFUSALS.callNotFound);
     // The live capture saw the call flushed before the MCP request; one short
     // wait covers a slower disk. Spent now: each call id gets one wait.

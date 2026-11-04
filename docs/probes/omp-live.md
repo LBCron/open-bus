@@ -105,4 +105,3 @@ Run 4 (fix round 2), same script: the kind now comes from `ctx.agent` at
 (`arktype`, `zod`, `typebox`). The results matched run 3: tools were top-level,
 the root was `omp`, both subagents got the guard error, and the hub held only
 the root.
-

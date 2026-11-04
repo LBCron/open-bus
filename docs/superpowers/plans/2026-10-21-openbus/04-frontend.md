@@ -16,13 +16,13 @@
 
 **Out of scope, owned elsewhere:**
 
-| Surface | Owner |
-|---|---|
-| `/approve/:user_code` (Worker-rendered, no JS) | Backend (B) |
-| `POST /auth/logout`, session cookie, `GET /me` | Backend (B) |
-| `packages/shared` schemas, `R`, `AUTH` | Backend (F2) |
-| `packages/ui` tokens, components, brand assets | Design (D) |
-| Landing page, `llms.txt` | Design (D) |
+| Surface                                        | Owner        |
+| ---------------------------------------------- | ------------ |
+| `/approve/:user_code` (Worker-rendered, no JS) | Backend (B)  |
+| `POST /auth/logout`, session cookie, `GET /me` | Backend (B)  |
+| `packages/shared` schemas, `R`, `AUTH`         | Backend (F2) |
+| `packages/ui` tokens, components, brand assets | Design (D)   |
+| Landing page, `llms.txt`                       | Design (D)   |
 
 The FE never edits `packages/shared` or `packages/ui`. A missing export is a message to that package's owner, not a patch.
 
@@ -43,18 +43,18 @@ The FE never edits `packages/shared` or `packages/ui`. A missing export is a mes
 Ask OpenBus Backend for exactly these exports from `@ob/shared`; the whole FE touches them through one file (`apps/dashboard/src/api/contract.ts`, Task FE1), so a rename is a one-file change.
 
 ```ts
-MachineSchema          // { id, label, createdAt, lastUsed: string|null, revokedAt: string|null }
-MachinesResponseSchema // { machines: Machine[] }
-AgentSchema            // { id, namespace, name, kind: "claude-code"|"opencode"|"pi",
-                       //   machineId, machineLabel, global: boolean, live: boolean, updatedAt }
-AgentsResponseSchema   // { agents: Agent[] }
-MeSchema               // { user: { id, email, name: string|null } }
-BusEventSchema         // see Task FE1 — if F2 has no event schema, define it in contract.ts
-R                      // R.me, R.machines, R.machine(id), R.agents, R.events, R.login
-AUTH                   // AUTH.login, AUTH.logout
+MachineSchema; // { id, label, createdAt, lastUsed: string|null, revokedAt: string|null }
+MachinesResponseSchema; // { machines: Machine[] }
+AgentSchema; // { id, namespace, name, kind: "claude-code"|"opencode"|"pi",
+//   machineId, machineLabel, global: boolean, live: boolean, updatedAt }
+AgentsResponseSchema; // { agents: Agent[] }
+MeSchema; // { user: { id, email, name: string|null } }
+BusEventSchema; // see Task FE1 — if F2 has no event schema, define it in contract.ts
+R; // R.me, R.machines, R.machine(id), R.agents, R.events, R.login
+AUTH; // AUTH.login, AUTH.logout
 ```
 
-Also needed from Backend: the CSRF header name on cookie-authenticated `DELETE` (this plan assumes `X-OB-Request: 1`, following OA's `X-OA-Request: 1`), and `DELETE /api/v1/machines/:id` answering `204` on success and `404` when the machine is unknown *or already revoked*.
+Also needed from Backend: the CSRF header name on cookie-authenticated `DELETE` (this plan assumes `X-OB-Request: 1`, following OA's `X-OA-Request: 1`), and `DELETE /api/v1/machines/:id` answering `204` on success and `404` when the machine is unknown _or already revoked_.
 
 ## File structure
 
@@ -116,7 +116,6 @@ apps/dashboard/
 ### Task FE0: Worktree and scaffold check
 
 **Files:** none (verification only)
-
 - [x] **Step 1: Create the worktree** (only once F1 is on `origin/main`)
 
 ```bash
@@ -135,7 +134,6 @@ ls packages/shared/src packages/ui/src
 ```
 
 Expected: a pnpm workspace with `apps/dashboard`, `packages/shared`, `packages/ui`. Write the **actual** names into a scratch note; this plan says `@ob/dashboard`, `@ob/shared`, `@ob/ui`. If they differ, substitute everywhere and say so in the PR body.
-
 - [x] **Step 3: Confirm the dashboard runs**
 
 ```bash
@@ -165,7 +163,6 @@ grep -rn "MachinesResponseSchema\|AgentsResponseSchema\|BusEvent\|const R =" pac
 ```
 
 Expected: the shapes in **Contract the FE needs from F2** exist. Missing ones are a message to `OpenBus Backend`, not a workaround in `packages/shared`. `BusEventSchema` is the likeliest gap and has a defined fallback in Task FE1.
-
 - [x] **Step 5: Commit**
 
 ```bash
@@ -194,23 +191,34 @@ import { installHarness, server } from "./harness";
 
 installHarness();
 
-const wire = (body: unknown, status = 200) => HttpResponse.json(body, { status });
+const wire = (body: unknown, status = 200) =>
+  HttpResponse.json(body, { status });
 
 test("parses a valid body through its schema", async () => {
   server.use(http.get("*/api/v1/me", () => wire({ user: { id: "u1" } })));
-  const me = await api.get("/api/v1/me", z.object({ user: z.object({ id: z.string() }) }));
+  const me = await api.get(
+    "/api/v1/me",
+    z.object({ user: z.object({ id: z.string() }) }),
+  );
   expect(me.user.id).toBe("u1");
 });
 
 test("a 404 becomes ApiClientError(not_found) carrying the server message", async () => {
   server.use(
     http.delete("*/api/v1/machines/m1", () =>
-      HttpResponse.json({ error: { code: "not_found", message: "No such machine" } }, { status: 404 }),
+      HttpResponse.json(
+        { error: { code: "not_found", message: "No such machine" } },
+        { status: 404 },
+      ),
     ),
   );
   const err = await api.send("DELETE", "/api/v1/machines/m1").catch((e) => e);
   expect(err).toBeInstanceOf(ApiClientError);
-  expect(err).toMatchObject({ code: "not_found", status: 404, message: "No such machine" });
+  expect(err).toMatchObject({
+    code: "not_found",
+    status: 404,
+    message: "No such machine",
+  });
 });
 
 test("mutations carry the CSRF header", async () => {
@@ -227,12 +235,16 @@ test("mutations carry the CSRF header", async () => {
 
 test("an unparseable body is an internal error, not a crash", async () => {
   server.use(http.get("*/api/v1/me", () => wire({ nope: true })));
-  const err = await api.get("/api/v1/me", z.object({ user: z.string() })).catch((e) => e);
+  const err = await api
+    .get("/api/v1/me", z.object({ user: z.string() }))
+    .catch((e) => e);
   expect(err).toMatchObject({ code: "internal" });
 });
 
 test("BusEventSchema accepts a snapshot frame and rejects an unknown type", () => {
-  expect(BusEventSchema.safeParse({ type: "agents", agents: [] }).success).toBe(true);
+  expect(BusEventSchema.safeParse({ type: "agents", agents: [] }).success).toBe(
+    true,
+  );
   expect(BusEventSchema.safeParse({ type: "wat" }).success).toBe(false);
 });
 ```
@@ -244,7 +256,6 @@ pnpm --filter @ob/dashboard test -- client.test.ts
 ```
 
 Expected: FAIL — cannot resolve `../src/api/client`.
-
 - [x] **Step 3: Create the contract file**
 
 `apps/dashboard/src/api/contract.ts` — the single place the FE names F2's REST schemas:
@@ -287,7 +298,6 @@ export type BusEvent = z.infer<typeof BusEventSchema>;
 ```
 
 If `McpErrorSchema` is not F2's error name, drop that line and let `client.ts` parse loosely (it does).
-
 - [x] **Step 4: Create the client**
 
 `apps/dashboard/src/api/client.ts`:
@@ -336,11 +346,14 @@ function toError(text: string, status: number): ApiClientError {
   const code = (box as { code?: unknown })?.code;
   const message = (box as { message?: unknown })?.message;
   let out: ClientErrorCode = "internal";
-  if (typeof code === "string" && KNOWN.includes(code)) out = code as ClientErrorCode;
+  if (typeof code === "string" && KNOWN.includes(code))
+    out = code as ClientErrorCode;
   else if (status === 401) out = "unauthorized";
   return new ApiClientError(
     out,
-    typeof message === "string" && message ? message : `Unexpected response (HTTP ${status})`,
+    typeof message === "string" && message
+      ? message
+      : `Unexpected response (HTTP ${status})`,
     status,
   );
 }
@@ -357,16 +370,29 @@ async function request(path: string, init: RequestInit): Promise<Response> {
   throw toError(await res.text().catch(() => ""), res.status);
 }
 
-async function parse<T>(res: Response, schema: z.ZodType<T> | undefined): Promise<T> {
+async function parse<T>(
+  res: Response,
+  schema: z.ZodType<T> | undefined,
+): Promise<T> {
   if (!schema || res.status === 204) return undefined as T;
   const out = schema.safeParse(await res.json().catch(() => null));
   if (out.success) return out.data;
-  const fields = [...new Set(out.error.issues.map((i) => i.path.join(".") || "(root)"))];
-  throw new ApiClientError("internal", `Invalid response: ${fields.join(", ")}`, res.status);
+  const fields = [
+    ...new Set(out.error.issues.map((i) => i.path.join(".") || "(root)")),
+  ];
+  throw new ApiClientError(
+    "internal",
+    `Invalid response: ${fields.join(", ")}`,
+    res.status,
+  );
 }
 
 export const api = {
-  async get<T>(path: string, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {
+  async get<T>(
+    path: string,
+    schema: z.ZodType<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
     return parse(await request(path, { method: "GET", signal }), schema);
   },
   async send<T = void>(
@@ -430,7 +456,6 @@ pnpm --filter @ob/dashboard typecheck
 ```
 
 Expected: 5 passing; typecheck clean.
-
 - [x] **Step 8: Commit**
 
 ```bash
@@ -463,7 +488,13 @@ import { installHarness, server } from "./harness";
 installHarness();
 
 const machines = [
-  { id: "m1", label: "studio-mbp", createdAt: "2026-10-21T10:00:00Z", lastUsed: null, revokedAt: null },
+  {
+    id: "m1",
+    label: "studio-mbp",
+    createdAt: "2026-10-21T10:00:00Z",
+    lastUsed: null,
+    revokedAt: null,
+  },
 ];
 
 const wrap = (client = makeQueryClient()) => {
@@ -474,7 +505,9 @@ const wrap = (client = makeQueryClient()) => {
 };
 
 test("useMachines loads the list", async () => {
-  server.use(http.get("*/api/v1/machines", () => HttpResponse.json({ machines })));
+  server.use(
+    http.get("*/api/v1/machines", () => HttpResponse.json({ machines })),
+  );
   const { wrapper } = wrap();
   const { result } = renderHook(() => useMachines(), { wrapper });
   await waitFor(() => expect(result.current.data?.machines).toHaveLength(1));
@@ -484,7 +517,13 @@ test("useMachines loads the list", async () => {
 test("revoke marks the row revoked before the server answers", async () => {
   server.use(
     http.get("*/api/v1/machines", () => HttpResponse.json({ machines })),
-    http.delete("*/api/v1/machines/m1", () => new Promise((r) => setTimeout(() => r(new HttpResponse(null, { status: 204 })), 50))),
+    http.delete(
+      "*/api/v1/machines/m1",
+      () =>
+        new Promise((r) =>
+          setTimeout(() => r(new HttpResponse(null, { status: 204 })), 50),
+        ),
+    ),
   );
   const { client, wrapper } = wrap();
   const { result: list } = renderHook(() => useMachines(), { wrapper });
@@ -495,7 +534,10 @@ test("revoke marks the row revoked before the server answers", async () => {
     void revoke.result.current.mutateAsync("m1");
   });
   await waitFor(() =>
-    expect(client.getQueryData<{ machines: typeof machines }>(["machines"])?.machines[0]?.revokedAt).not.toBeNull(),
+    expect(
+      client.getQueryData<{ machines: typeof machines }>(["machines"])
+        ?.machines[0]?.revokedAt,
+    ).not.toBeNull(),
   );
   await waitFor(() => expect(revoke.result.current.isSuccess).toBe(true));
 });
@@ -504,7 +546,10 @@ test("a failed revoke rolls the row back", async () => {
   server.use(
     http.get("*/api/v1/machines", () => HttpResponse.json({ machines })),
     http.delete("*/api/v1/machines/m1", () =>
-      HttpResponse.json({ error: { code: "internal", message: "Boom" } }, { status: 500 }),
+      HttpResponse.json(
+        { error: { code: "internal", message: "Boom" } },
+        { status: 500 },
+      ),
     ),
   );
   const { client, wrapper } = wrap();
@@ -515,7 +560,8 @@ test("a failed revoke rolls the row back", async () => {
   await act(async () => {
     await revoke.result.current.mutateAsync("m1").catch(() => {});
   });
-  const row = client.getQueryData<{ machines: typeof machines }>(["machines"])?.machines[0];
+  const row = client.getQueryData<{ machines: typeof machines }>(["machines"])
+    ?.machines[0];
   expect(row?.revokedAt).toBeNull();
 });
 
@@ -523,7 +569,10 @@ test("a 404 on revoke is success: the machine was already revoked", async () => 
   server.use(
     http.get("*/api/v1/machines", () => HttpResponse.json({ machines })),
     http.delete("*/api/v1/machines/m1", () =>
-      HttpResponse.json({ error: { code: "not_found", message: "No such machine" } }, { status: 404 }),
+      HttpResponse.json(
+        { error: { code: "not_found", message: "No such machine" } },
+        { status: 404 },
+      ),
     ),
   );
   const { wrapper } = wrap();
@@ -545,7 +594,6 @@ pnpm --filter @ob/dashboard test -- queries.test.tsx
 ```
 
 Expected: FAIL — cannot resolve `../src/api/queries`.
-
 - [x] **Step 3: Create `queryClient.ts` if F1 has none**
 
 `apps/dashboard/src/api/queryClient.ts`:
@@ -556,11 +604,17 @@ import { ApiClientError } from "./client";
 
 /** 4xx never retries (a revoked session just re-loops); otherwise at most twice. */
 export const shouldRetry = (failureCount: number, error: unknown): boolean => {
-  if (error instanceof ApiClientError && error.status >= 400 && error.status < 500) return false;
+  if (
+    error instanceof ApiClientError &&
+    error.status >= 400 &&
+    error.status < 500
+  )
+    return false;
   return failureCount < 2;
 };
 
-export const makeQueryClient = () => new QueryClient({ defaultOptions: { queries: { retry: shouldRetry } } });
+export const makeQueryClient = () =>
+  new QueryClient({ defaultOptions: { queries: { retry: shouldRetry } } });
 ```
 
 - [x] **Step 4: Create the queries**
@@ -595,7 +649,8 @@ export const useMe = () =>
 export const useMachines = () =>
   useQuery({
     queryKey: qk.machines,
-    queryFn: ({ signal }) => api.get(R.machines, MachinesResponseSchema, signal),
+    queryFn: ({ signal }) =>
+      api.get(R.machines, MachinesResponseSchema, signal),
     staleTime: 10_000,
   });
 
@@ -628,7 +683,9 @@ export const useRevokeMachine = () => {
       const at = new Date().toISOString();
       if (before)
         qc.setQueryData<MachinesData>(qk.machines, {
-          machines: before.machines.map((m) => (m.id === id ? { ...m, revokedAt: at } : m)),
+          machines: before.machines.map((m) =>
+            m.id === id ? { ...m, revokedAt: at } : m,
+          ),
         });
       return { before };
     },
@@ -640,7 +697,10 @@ export const useRevokeMachine = () => {
       });
     },
     onSuccess: () => {
-      toast({ title: "Machine revoked", description: "Its agents left the roster." });
+      toast({
+        title: "Machine revoked",
+        description: "Its agents left the roster.",
+      });
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: qk.machines });
@@ -651,7 +711,6 @@ export const useRevokeMachine = () => {
 ```
 
 If `toast` is not exported by `@ob/ui/shadcn`, use `sonner`'s `toast.error` and `toast.success` directly; the test does not assert on toasts.
-
 - [x] **Step 5: Run the tests to verify they pass**
 
 ```bash
@@ -659,7 +718,6 @@ pnpm --filter @ob/dashboard test -- queries.test.tsx
 ```
 
 Expected: 4 passing.
-
 - [x] **Step 6: Commit**
 
 ```bash
@@ -721,8 +779,16 @@ export const lastSource = () => FakeEventSource.all.at(-1)!;
 
 ```ts
 import { afterEach, expect, test, vi } from "vitest";
-import { type BusEventsOptions, connectBusEvents, patchFor } from "../src/live/busEvents";
-import { FakeEventSource, installFakeEventSource, lastSource } from "./fakeEventSource";
+import {
+  type BusEventsOptions,
+  connectBusEvents,
+  patchFor,
+} from "../src/live/busEvents";
+import {
+  FakeEventSource,
+  installFakeEventSource,
+  lastSource,
+} from "./fakeEventSource";
 
 let restore: (() => void) | undefined;
 afterEach(() => {
@@ -739,12 +805,21 @@ const start = (opts: BusEventsOptions) => {
 };
 
 const agent = {
-  id: "a1", namespace: "repo:github.com/acme/app", name: "claude-1", kind: "claude-code" as const,
-  machineId: "m1", machineLabel: "studio-mbp", global: false, live: true, updatedAt: "2026-10-21T10:00:00Z",
+  id: "a1",
+  namespace: "repo:github.com/acme/app",
+  name: "claude-1",
+  kind: "claude-code" as const,
+  machineId: "m1",
+  machineLabel: "studio-mbp",
+  global: false,
+  live: true,
+  updatedAt: "2026-10-21T10:00:00Z",
 };
 
 test("patchFor maps snapshots and refuses frames it does not know", () => {
-  expect(patchFor({ type: "agents", agents: [agent] })).toEqual({ agents: [agent] });
+  expect(patchFor({ type: "agents", agents: [agent] })).toEqual({
+    agents: [agent],
+  });
   expect(patchFor({ type: "hello" })).toBeNull();
   expect(patchFor({ type: "agent_up" } as never)).toBeNull();
 });
@@ -789,7 +864,12 @@ test("a drop after hello reconnects with backoff", () => {
 test("a failure before the first hello waits for retry(), not a storm", () => {
   vi.useFakeTimers();
   restore = installFakeEventSource();
-  const c = start({ onHello: vi.fn(), onSnapshot: vi.fn(), onDown: vi.fn(), onUnknown: vi.fn() });
+  const c = start({
+    onHello: vi.fn(),
+    onSnapshot: vi.fn(),
+    onDown: vi.fn(),
+    onUnknown: vi.fn(),
+  });
   lastSource().fail();
   vi.advanceTimersByTime(60_000);
   expect(FakeEventSource.all).toHaveLength(1);
@@ -801,7 +881,12 @@ test("a failure before the first hello waits for retry(), not a storm", () => {
 test("close stops reconnecting", () => {
   vi.useFakeTimers();
   restore = installFakeEventSource();
-  const c = start({ onHello: vi.fn(), onSnapshot: vi.fn(), onDown: vi.fn(), onUnknown: vi.fn() });
+  const c = start({
+    onHello: vi.fn(),
+    onSnapshot: vi.fn(),
+    onDown: vi.fn(),
+    onUnknown: vi.fn(),
+  });
   lastSource().push({ type: "hello" });
   c.close();
   lastSource().fail();
@@ -817,13 +902,18 @@ pnpm --filter @ob/dashboard test -- bus-events.test.ts
 ```
 
 Expected: FAIL — cannot resolve `../src/live/busEvents`.
-
 - [x] **Step 3: Write the reducer and runner**
 
 `apps/dashboard/src/live/busEvents.ts`:
 
 ```ts
-import { type Agent, type BusEvent, BusEventSchema, type Machine, R } from "../api/contract";
+import {
+  type Agent,
+  type BusEvent,
+  BusEventSchema,
+  type Machine,
+  R,
+} from "../api/contract";
 
 const BASE_MS = 1_000;
 const CAP_MS = 30_000;
@@ -933,7 +1023,6 @@ pnpm --filter @ob/dashboard test -- bus-events.test.ts
 ```
 
 Expected: 6 passing.
-
 - [x] **Step 5: Write the hook (no test of its own; FE7 covers it end to end)**
 
 `apps/dashboard/src/live/useBusEvents.ts`:
@@ -965,7 +1054,8 @@ export function useBusEvents() {
       },
       onSnapshot: (s) => {
         setLive(true);
-        if ("machines" in s) qc.setQueryData(qk.machines, { machines: s.machines });
+        if ("machines" in s)
+          qc.setQueryData(qk.machines, { machines: s.machines });
         else qc.setQueryData(qk.agents, { agents: s.agents });
       },
       onDown: () => setLive(false),
@@ -1024,7 +1114,9 @@ test("revoking a machine drops its agents and tells the stream", async () => {
 
   const res = await bus.revoke("studio-mbp");
   expect(res.status).toBe(204);
-  expect(bus.machines().find((m) => m.id === "studio-mbp")?.revokedAt).not.toBeNull();
+  expect(
+    bus.machines().find((m) => m.id === "studio-mbp")?.revokedAt,
+  ).not.toBeNull();
   expect(bus.agents().some((a) => a.machineId === "studio-mbp")).toBe(false);
   expect(seen).toEqual([
     { type: "agents", agents: bus.agents() },
@@ -1057,7 +1149,6 @@ pnpm --filter @ob/dashboard test -- mocks.test.ts
 ```
 
 Expected: FAIL — cannot resolve `../src/mocks/handlers`.
-
 - [x] **Step 3: Write the fixtures**
 
 `apps/dashboard/src/mocks/fixtures.ts` — shaped by the F2 schemas, checked at import:
@@ -1072,20 +1163,61 @@ const T = "2026-10-21T10:00:00.000Z";
 
 export const fixtures = {
   machines: [
-    machine({ id: "m1", label: "studio-mbp", createdAt: T, lastUsed: "2026-10-21T09:58:00.000Z", revokedAt: null }),
-    machine({ id: "m2", label: "old-thinkpad", createdAt: T, lastUsed: null, revokedAt: "2026-10-20T12:00:00.000Z" }),
+    machine({
+      id: "m1",
+      label: "studio-mbp",
+      createdAt: T,
+      lastUsed: "2026-10-21T09:58:00.000Z",
+      revokedAt: null,
+    }),
+    machine({
+      id: "m2",
+      label: "old-thinkpad",
+      createdAt: T,
+      lastUsed: null,
+      revokedAt: "2026-10-20T12:00:00.000Z",
+    }),
   ],
   agents: [
-    agent({ id: "a1", namespace: "repo:github.com/acme/app", name: "claude-1", kind: "claude-code", machineId: "m1", machineLabel: "studio-mbp", global: false, live: true, updatedAt: T }),
-    agent({ id: "a2", namespace: "repo:github.com/acme/app", name: "opencode-1", kind: "opencode", machineId: "m1", machineLabel: "studio-mbp", global: false, live: false, updatedAt: T }),
-    agent({ id: "a3", namespace: "repo:github.com/acme/docs", name: "scout", kind: "pi", machineId: "m1", machineLabel: "studio-mbp", global: true, live: true, updatedAt: T }),
+    agent({
+      id: "a1",
+      namespace: "repo:github.com/acme/app",
+      name: "claude-1",
+      kind: "claude-code",
+      machineId: "m1",
+      machineLabel: "studio-mbp",
+      global: false,
+      live: true,
+      updatedAt: T,
+    }),
+    agent({
+      id: "a2",
+      namespace: "repo:github.com/acme/app",
+      name: "opencode-1",
+      kind: "opencode",
+      machineId: "m1",
+      machineLabel: "studio-mbp",
+      global: false,
+      live: false,
+      updatedAt: T,
+    }),
+    agent({
+      id: "a3",
+      namespace: "repo:github.com/acme/docs",
+      name: "scout",
+      kind: "pi",
+      machineId: "m1",
+      machineLabel: "studio-mbp",
+      global: true,
+      live: true,
+      updatedAt: T,
+    }),
   ],
   me: { user: { id: "u1", email: "ada@example.com", name: "Ada Lovelace" } },
 };
 ```
 
 If the F2 `AgentSchema` uses `lastSeen` rather than `updatedAt`, change only these three lines.
-
 - [x] **Step 4: Write the mock bus and handlers**
 
 `apps/dashboard/src/mocks/handlers.ts`:
@@ -1119,7 +1251,9 @@ export function createMockBus() {
     async revoke(id: string) {
       const m = machines.find((x) => x.id === id);
       if (!m || m.revokedAt) return new Response(null, { status: 404 });
-      machines = machines.map((x) => (x.id === id ? { ...x, revokedAt: new Date().toISOString() } : x));
+      machines = machines.map((x) =>
+        x.id === id ? { ...x, revokedAt: new Date().toISOString() } : x,
+      );
       agents = agents.filter((a) => a.machineId !== id);
       push({ type: "agents", agents });
       push({ type: "machines", machines });
@@ -1143,7 +1277,6 @@ export function handlersFor(bus: MockBus, origin = "") {
 ```
 
 Replace `handlersFor` with the real thing in the next step; the test above only needs `createMockBus`.
-
 - [x] **Step 5: Run the tests to verify they pass**
 
 ```bash
@@ -1151,7 +1284,6 @@ pnpm --filter @ob/dashboard test -- mocks.test.ts
 ```
 
 Expected: 3 passing.
-
 - [x] **Step 6: Wire MSW handlers (HTTP + SSE)**
 
 Replace `handlersFor` in `apps/dashboard/src/mocks/handlers.ts` with:
@@ -1170,7 +1302,9 @@ export function handlersFor(bus: MockBus) {
       const all = bus.agents();
       return json({ agents: ns ? all.filter((a) => a.namespace === ns) : all });
     }),
-    http.delete("*/api/v1/machines/:id", ({ params }) => bus.revoke(String(params.id))),
+    http.delete("*/api/v1/machines/:id", ({ params }) =>
+      bus.revoke(String(params.id)),
+    ),
     http.get("*/api/v1/events", () => {
       const enc = new TextEncoder();
       let off: (() => void) | null = null;
@@ -1191,7 +1325,10 @@ export function handlersFor(bus: MockBus) {
         },
       });
       return new HttpResponse(stream, {
-        headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-store",
+        },
       });
     }),
   ];
@@ -1211,7 +1348,9 @@ test("GET /api/v1/agents and DELETE /api/v1/machines/:id answer like the API", a
   server.use(...handlersFor(bus));
   const list = await (await fetch("http://localhost/api/v1/agents")).json();
   expect(list.agents).toHaveLength(3);
-  const del = await fetch("http://localhost/api/v1/machines/m1", { method: "DELETE" });
+  const del = await fetch("http://localhost/api/v1/machines/m1", {
+    method: "DELETE",
+  });
   expect(del.status).toBe(204);
   const after = await (await fetch("http://localhost/api/v1/agents")).json();
   expect(after.agents).toHaveLength(1);
@@ -1219,7 +1358,6 @@ test("GET /api/v1/agents and DELETE /api/v1/machines/:id answer like the API", a
 ```
 
 (The `handlersFor` import is already at the top of `mocks.test.ts` by then; do not duplicate it.)
-
 - [x] **Step 7: Write the browser bootstrap**
 
 `apps/dashboard/src/mocks/global.d.ts`:
@@ -1310,7 +1448,6 @@ curl -s localhost:5173/api/v1/machines   # expect both fixtures
 ```
 
 Expected: tests pass; biome sorts the imports in the mock files; dev serves two machines; `curl` answers JSON through the worker.
-
 - [x] **Step 11: Commit**
 
 ```bash
@@ -1348,29 +1485,42 @@ installHarness();
 const mount = (path: string) =>
   render(
     <QueryClientProvider client={makeQueryClient()}>
-      <RouterProvider router={createAppRouter(createMemoryHistory({ initialEntries: [path] }))} />
+      <RouterProvider
+        router={createAppRouter(
+          createMemoryHistory({ initialEntries: [path] }),
+        )}
+      />
     </QueryClientProvider>,
   );
 
 test("an anonymous visitor gets the sign-in page, not an empty dashboard", async () => {
   server.use(
     http.get("*/api/v1/me", () =>
-      HttpResponse.json({ error: { code: "unauthorized", message: "Sign in" } }, { status: 401 }),
+      HttpResponse.json(
+        { error: { code: "unauthorized", message: "Sign in" } },
+        { status: 401 },
+      ),
     ),
   );
   mount("/");
-  expect(await screen.findByRole("heading", { name: /sign in/i })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: /continue with cloudflare/i })).toHaveAttribute(
-    "href",
-    expect.stringContaining("/auth/login"),
-  );
+  expect(
+    await screen.findByRole("heading", { name: /sign in/i }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: /continue with cloudflare/i }),
+  ).toHaveAttribute("href", expect.stringContaining("/auth/login"));
 });
 
 test("a signed-in visitor sees the machines page", async () => {
   server.use(...handlersFor(createMockBus()));
   mount("/");
-  expect(await screen.findByRole("heading", { name: "Machines" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Agents" })).toHaveAttribute("href", "/agents");
+  expect(
+    await screen.findByRole("heading", { name: "Machines" }),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Agents" })).toHaveAttribute(
+    "href",
+    "/agents",
+  );
 });
 
 test("an unknown path is a 404 inside the shell", async () => {
@@ -1397,14 +1547,18 @@ globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
 
 if (!window.matchMedia)
   window.matchMedia = ((q: string) => ({
-    matches: false, media: q, onchange: null,
-    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+    matches: false,
+    media: q,
+    onchange: null,
+    addEventListener() {},
+    removeEventListener() {},
+    addListener() {},
+    removeListener() {},
     dispatchEvent: () => false,
   })) as unknown as typeof window.matchMedia;
 ```
 
 `FakeEventSource` is created in Task FE3, so if FE5 runs first, write `test/fakeEventSource.ts` from FE3 Step 1 now.
-
 - [x] **Step 2: Run it to verify it fails**
 
 ```bash
@@ -1412,7 +1566,6 @@ pnpm --filter @ob/dashboard test -- shell.test.tsx
 ```
 
 Expected: FAIL — cannot resolve `../src/router`.
-
 - [x] **Step 3: Write the pages**
 
 `apps/dashboard/src/pages/SignIn.tsx` (Design replaces the markup; the link is the contract):
@@ -1427,9 +1580,12 @@ export function SignIn({ failed = false }: { failed?: boolean }) {
   useDocumentTitle("Sign in");
   return (
     <main className="mx-auto mt-24 max-w-[400px] px-6">
-      <h1 className="text-[length:var(--ob-text-xl,1.5rem)] font-semibold">Sign in</h1>
+      <h1 className="text-[length:var(--ob-text-xl,1.5rem)] font-semibold">
+        Sign in
+      </h1>
       <p className="mt-2 text-[color:var(--ob-text-2,#454c56)]">
-        OpenBus is self-hosted. Sign in with the account your Access policy allows.
+        OpenBus is self-hosted. Sign in with the account your Access policy
+        allows.
       </p>
       {failed && (
         <p role="alert" className="mt-4 text-[color:var(--ob-warn,#8a5a00)]">
@@ -1437,7 +1593,9 @@ export function SignIn({ failed = false }: { failed?: boolean }) {
         </p>
       )}
       <Button asChild className="mt-6 w-full">
-        <a href={`${AUTH.login}?next=${encodeURIComponent("/")}`}>Continue with Cloudflare Access</a>
+        <a href={`${AUTH.login}?next=${encodeURIComponent("/")}`}>
+          Continue with Cloudflare Access
+        </a>
       </Button>
     </main>
   );
@@ -1454,7 +1612,9 @@ export function NotFound() {
   useDocumentTitle("Not found");
   return (
     <main className="mx-auto mt-24 max-w-[400px] px-6">
-      <h1 className="text-[length:var(--ob-text-xl,1.5rem)] font-semibold">Not found</h1>
+      <h1 className="text-[length:var(--ob-text-xl,1.5rem)] font-semibold">
+        Not found
+      </h1>
       <p className="mt-2">That page isn't part of the bus.</p>
       <Link to="/" className="mt-6 inline-block underline">
         Back to machines
@@ -1490,14 +1650,16 @@ import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useMe } from "../api/queries";
 import { SignIn } from "../pages/SignIn";
 
-const TAB = "px-3 py-2 text-sm rounded-[var(--ob-radius-6,6px)] aria-[current=page]:bg-[var(--ob-surface-2,#f6f7f9)]";
+const TAB =
+  "px-3 py-2 text-sm rounded-[var(--ob-radius-6,6px)] aria-[current=page]:bg-[var(--ob-surface-2,#f6f7f9)]";
 
 /** Design owns the chrome; this keeps two tabs and one sign-in gate. */
 export function AppLayout() {
   const me = useMe();
   const path = useRouterState({ select: (s) => s.location.pathname });
 
-  if (me.isPending) return <div className="p-6 text-sm opacity-60">Loading…</div>;
+  if (me.isPending)
+    return <div className="p-6 text-sm opacity-60">Loading…</div>;
   if (me.isError) {
     const unauthorized = (me.error as { status?: number })?.status === 401;
     return <SignIn failed={!unauthorized} />;
@@ -1509,10 +1671,18 @@ export function AppLayout() {
       <header className="flex items-center gap-4 border-b border-[var(--ob-divider,#e0e3e8)] px-6 py-3">
         <span className="font-semibold">OpenBus</span>
         <nav aria-label="Main" className="flex gap-1">
-          <Link to="/" className={TAB} aria-current={path === "/" ? "page" : undefined}>
+          <Link
+            to="/"
+            className={TAB}
+            aria-current={path === "/" ? "page" : undefined}
+          >
             Machines
           </Link>
-          <Link to="/agents" className={TAB} aria-current={path === "/agents" ? "page" : undefined}>
+          <Link
+            to="/agents"
+            className={TAB}
+            aria-current={path === "/agents" ? "page" : undefined}
+          >
             Agents
           </Link>
         </nav>
@@ -1542,18 +1712,24 @@ import { Machines } from "./machines/Machines";
 import { NotFound } from "./pages/NotFound";
 import { SignIn } from "./pages/SignIn";
 
-const root = createRootRoute({ component: AppLayout, notFoundComponent: NotFound });
+const root = createRootRoute({
+  component: AppLayout,
+  notFoundComponent: NotFound,
+});
 const route = (path: string, component: () => React.ReactNode) =>
   createRoute({ getParentRoute: () => root, path, component });
 
 const routeTree = root.addChildren([
   route("/", Machines),
   route("/agents", Agents),
-  route("/sign-in", () => <SignIn failed={new URLSearchParams(location.search).has("error")} />),
+  route("/sign-in", () => (
+    <SignIn failed={new URLSearchParams(location.search).has("error")} />
+  )),
   route("*", NotFound),
 ]);
 
-export const createAppRouter = (history?: RouterHistory) => createRouter({ routeTree, history });
+export const createAppRouter = (history?: RouterHistory) =>
+  createRouter({ routeTree, history });
 export const router = createAppRouter();
 
 declare module "@tanstack/react-router" {
@@ -1568,14 +1744,22 @@ declare module "@tanstack/react-router" {
 ```tsx
 // apps/dashboard/src/machines/Machines.tsx
 export function Machines() {
-  return <h1 className="text-[length:var(--ob-text-xl,1.5rem)] font-semibold">Machines</h1>;
+  return (
+    <h1 className="text-[length:var(--ob-text-xl,1.5rem)] font-semibold">
+      Machines
+    </h1>
+  );
 }
 ```
 
 ```tsx
 // apps/dashboard/src/agents/Agents.tsx
 export function Agents() {
-  return <h1 className="text-[length:var(--ob-text-xl,1.5rem)] font-semibold">Agents</h1>;
+  return (
+    <h1 className="text-[length:var(--ob-text-xl,1.5rem)] font-semibold">
+      Agents
+    </h1>
+  );
 }
 ```
 
@@ -1615,7 +1799,6 @@ pnpm --filter @ob/dashboard typecheck
 ```
 
 Expected: 3 passing; typecheck clean. If TanStack Router types complain about `createRootRoute` ordering, move `routeTree` above `router` (it already is) and ensure `router.tsx` is the only place `createAppRouter` lives.
-
 - [x] **Step 8: Commit**
 
 ```bash
@@ -1654,7 +1837,9 @@ const mount = () => {
   server.use(...handlersFor(bus));
   render(
     <QueryClientProvider client={makeQueryClient()}>
-      <RouterProvider router={createAppRouter(createMemoryHistory({ initialEntries: ["/"] }))} />
+      <RouterProvider
+        router={createAppRouter(createMemoryHistory({ initialEntries: ["/"] }))}
+      />
     </QueryClientProvider>,
   );
   return bus;
@@ -1664,8 +1849,12 @@ test("lists active and revoked machines, revoking only the active ones", async (
   mount();
   expect(await screen.findByText("studio-mbp")).toBeInTheDocument();
   expect(screen.getByText("old-thinkpad")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Revoke studio-mbp" })).toBeEnabled();
-  expect(screen.queryByRole("button", { name: "Revoke old-thinkpad" })).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Revoke studio-mbp" }),
+  ).toBeEnabled();
+  expect(
+    screen.queryByRole("button", { name: "Revoke old-thinkpad" }),
+  ).not.toBeInTheDocument();
   expect(screen.getByText("Revoked")).toBeInTheDocument();
 });
 
@@ -1685,37 +1874,58 @@ test("revoking asks first, names the machine, and needs a second click", async (
   expect(bus.machines().find((m) => m.id === "m1")?.revokedAt).toBeNull();
 
   await user.click(screen.getByRole("button", { name: "Revoke studio-mbp" }));
-  await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Revoke machine" }));
-  await waitFor(() => expect(bus.machines().find((m) => m.id === "m1")?.revokedAt).not.toBeNull());
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Revoke machine",
+    }),
+  );
   await waitFor(() =>
-    expect(screen.queryByRole("button", { name: "Revoke studio-mbp" })).not.toBeInTheDocument(),
+    expect(bus.machines().find((m) => m.id === "m1")?.revokedAt).not.toBeNull(),
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: "Revoke studio-mbp" }),
+    ).not.toBeInTheDocument(),
   );
 });
 
 test("a failed list shows a retry, not an empty page", async () => {
   server.use(
-    http.get("*/api/v1/me", () => HttpResponse.json({ user: { id: "u1", email: "a@b.co", name: null } })),
+    http.get("*/api/v1/me", () =>
+      HttpResponse.json({ user: { id: "u1", email: "a@b.co", name: null } }),
+    ),
     http.get("*/api/v1/machines", () =>
-      HttpResponse.json({ error: { code: "internal", message: "Boom" } }, { status: 500 }),
+      HttpResponse.json(
+        { error: { code: "internal", message: "Boom" } },
+        { status: 500 },
+      ),
     ),
   );
   render(
     <QueryClientProvider client={makeQueryClient()}>
-      <RouterProvider router={createAppRouter(createMemoryHistory({ initialEntries: ["/"] }))} />
+      <RouterProvider
+        router={createAppRouter(createMemoryHistory({ initialEntries: ["/"] }))}
+      />
     </QueryClientProvider>,
   );
-  expect(await screen.findByText(/couldn't load your machines/i)).toBeInTheDocument();
+  expect(
+    await screen.findByText(/couldn't load your machines/i),
+  ).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
 });
 
 test("no machines yet shows the install command", async () => {
   server.use(
-    http.get("*/api/v1/me", () => HttpResponse.json({ user: { id: "u1", email: "a@b.co", name: null } })),
+    http.get("*/api/v1/me", () =>
+      HttpResponse.json({ user: { id: "u1", email: "a@b.co", name: null } }),
+    ),
     http.get("*/api/v1/machines", () => HttpResponse.json({ machines: [] })),
   );
   render(
     <QueryClientProvider client={makeQueryClient()}>
-      <RouterProvider router={createAppRouter(createMemoryHistory({ initialEntries: ["/"] }))} />
+      <RouterProvider
+        router={createAppRouter(createMemoryHistory({ initialEntries: ["/"] }))}
+      />
     </QueryClientProvider>,
   );
   expect(await screen.findByText(/no machines yet/i)).toBeInTheDocument();
@@ -1736,7 +1946,6 @@ pnpm --filter @ob/dashboard test -- machines.test.tsx
 ```
 
 Expected: FAIL — no "studio-mbp" (the Machines page is still the stub).
-
 - [x] **Step 3: Write the revoke dialog**
 
 `apps/dashboard/src/machines/RevokeDialog.tsx`:
@@ -1762,7 +1971,9 @@ export function RevokeDialog({
   onClose: () => void;
 }) {
   const revoke = useRevokeMachine();
-  const opener = useRef<HTMLElement | null>(document.activeElement as HTMLElement | null);
+  const opener = useRef<HTMLElement | null>(
+    document.activeElement as HTMLElement | null,
+  );
   const panel = useRef<HTMLDivElement>(null);
 
   const close = () => {
@@ -1797,9 +2008,9 @@ export function RevokeDialog({
           Revoke {label}?
         </h2>
         <p id="revoke-desc" className="mt-2 text-sm">
-          Its agents leave the roster, its connection closes, and mail to them is refused. It can
-          join again only by running <code>npx open-bus</code> and being approved. This can't be
-          undone.
+          Its agents leave the roster, its connection closes, and mail to them
+          is refused. It can join again only by running{" "}
+          <code>npx open-bus</code> and being approved. This can't be undone.
         </p>
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="outline" onClick={close} disabled={revoke.isPending}>
@@ -1820,7 +2031,6 @@ export function RevokeDialog({
 ```
 
 Using a plain dialog rather than Radix keeps this test free of portals; Design may swap in `@ob/ui/shadcn`'s `Dialog`, keeping the `role="dialog"`, the panel-first focus, and the two button names.
-
 - [x] **Step 4: Write the row**
 
 `apps/dashboard/src/machines/MachineRow.tsx`:
@@ -1838,16 +2048,32 @@ export const lastUsed = (iso: string | null) => {
   if (secs < 60) return "used just now";
   const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
   const [n, unit]: [number, Intl.RelativeTimeFormatUnit] =
-    secs < 3600 ? [Math.round(secs / 60), "minute"] : secs < 86400 ? [Math.round(secs / 3600), "hour"] : [Math.round(secs / 86400), "day"];
+    secs < 3600
+      ? [Math.round(secs / 60), "minute"]
+      : secs < 86400
+        ? [Math.round(secs / 3600), "hour"]
+        : [Math.round(secs / 86400), "day"];
   return `used ${rtf.format(-n, unit)}`;
 };
 
-export function MachineRow({ machine, onRevoke }: { machine: Machine; onRevoke(id: string): void }) {
+export function MachineRow({
+  machine,
+  onRevoke,
+}: {
+  machine: Machine;
+  onRevoke(id: string): void;
+}) {
   const revoked = machine.revokedAt !== null;
   return (
     <li className="flex items-center gap-4 border-b border-[var(--ob-divider,#e0e3e8)] py-3">
       <div className="min-w-0 flex-1">
-        <p className={revoked ? "truncate line-through opacity-60" : "truncate font-medium"}>
+        <p
+          className={
+            revoked
+              ? "truncate line-through opacity-60"
+              : "truncate font-medium"
+          }
+        >
           {machine.label}
         </p>
         <p className="text-xs text-[color:var(--ob-muted,#5f6670)]">
@@ -1859,9 +2085,16 @@ export function MachineRow({ machine, onRevoke }: { machine: Machine; onRevoke(i
         </p>
       </div>
       {revoked ? (
-        <span className="rounded-full bg-[var(--ob-surface-2,#f6f7f9)] px-2 py-0.5 text-xs">Revoked</span>
+        <span className="rounded-full bg-[var(--ob-surface-2,#f6f7f9)] px-2 py-0.5 text-xs">
+          Revoked
+        </span>
       ) : (
-        <Button variant="outline" size="sm" onClick={() => onRevoke(machine.id)} aria-label={`Revoke ${machine.label}`}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onRevoke(machine.id)}
+          aria-label={`Revoke ${machine.label}`}
+        >
           Revoke
         </Button>
       )}
@@ -1895,13 +2128,22 @@ export function Machines() {
     <>
       <div className="flex items-baseline justify-between gap-4">
         <div>
-          <h1 className="text-[length:var(--ob-text-xl,1.5rem)] font-semibold">Machines</h1>
+          <h1 className="text-[length:var(--ob-text-xl,1.5rem)] font-semibold">
+            Machines
+          </h1>
           <p className="mt-1 text-sm text-[color:var(--ob-muted,#5f6670)]">
-            Every machine with a token for this bus. {active.length === 1 ? "1 is active" : `${active.length} are active`}.
+            Every machine with a token for this bus.{" "}
+            {active.length === 1
+              ? "1 is active"
+              : `${active.length} are active`}
+            .
           </p>
         </div>
         {!live && (
-          <span className="text-xs text-[color:var(--ob-muted,#5f6670)]" role="status">
+          <span
+            className="text-xs text-[color:var(--ob-muted,#5f6670)]"
+            role="status"
+          >
             Live updates paused
           </span>
         )}
@@ -1912,7 +2154,12 @@ export function Machines() {
       {error && (
         <div className="mt-6 rounded-[var(--ob-radius-8,8px)] border border-[var(--ob-border,#bec4cd)] p-4">
           <p className="text-sm">Couldn't load your machines.</p>
-          <Button variant="outline" size="sm" className="mt-3" onClick={() => void refetch()}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-3"
+            onClick={() => void refetch()}
+          >
             Try again
           </Button>
         </div>
@@ -1921,7 +2168,9 @@ export function Machines() {
       {data && data.machines.length === 0 && (
         <div className="mt-6 rounded-[var(--ob-radius-8,8px)] border border-dashed border-[var(--ob-border,#bec4cd)] p-6">
           <p className="font-medium">No machines yet</p>
-          <p className="mt-1 text-sm">On the machine you want to connect, run:</p>
+          <p className="mt-1 text-sm">
+            On the machine you want to connect, run:
+          </p>
           <pre className="mt-3 overflow-x-auto rounded-[var(--ob-radius-6,6px)] bg-[var(--ob-surface-2,#f6f7f9)] p-3 text-sm">
             <code>npx open-bus</code>
           </pre>
@@ -1937,7 +2186,11 @@ export function Machines() {
       )}
 
       {target && (
-        <RevokeDialog id={target.id} label={target.label} onClose={() => setPending(null)} />
+        <RevokeDialog
+          id={target.id}
+          label={target.label}
+          onClose={() => setPending(null)}
+        />
       )}
     </>
   );
@@ -1952,7 +2205,6 @@ pnpm --filter @ob/dashboard typecheck
 ```
 
 Expected: 4 passing; typecheck clean.
-
 - [x] **Step 7: Commit**
 
 ```bash
@@ -1993,7 +2245,11 @@ const mount = () => {
   const client = makeQueryClient();
   render(
     <QueryClientProvider client={client}>
-      <RouterProvider router={createAppRouter(createMemoryHistory({ initialEntries: ["/agents"] }))} />
+      <RouterProvider
+        router={createAppRouter(
+          createMemoryHistory({ initialEntries: ["/agents"] }),
+        )}
+      />
     </QueryClientProvider>,
   );
   return { bus, client };
@@ -2001,27 +2257,43 @@ const mount = () => {
 
 test("agents are grouped by namespace, live ones first, global ones badged", async () => {
   mount();
-  const app = await screen.findByRole("region", { name: "repo:github.com/acme/app" });
-  const names = within(app).getAllByRole("listitem").map((li) => li.textContent);
+  const app = await screen.findByRole("region", {
+    name: "repo:github.com/acme/app",
+  });
+  const names = within(app)
+    .getAllByRole("listitem")
+    .map((li) => li.textContent);
   expect(names[0]).toContain("claude-1");
   expect(names[1]).toContain("opencode-1");
-  const docs = screen.getByRole("region", { name: "repo:github.com/acme/docs" });
+  const docs = screen.getByRole("region", {
+    name: "repo:github.com/acme/docs",
+  });
   expect(within(docs).getByText("global")).toBeInTheDocument();
 });
 
 test("the live dot is labeled for screen readers", async () => {
   mount();
-  const app = await screen.findByRole("region", { name: "repo:github.com/acme/app" });
+  const app = await screen.findByRole("region", {
+    name: "repo:github.com/acme/app",
+  });
   expect(within(app).getByLabelText("claude-1 is live")).toBeInTheDocument();
-  expect(within(app).getByLabelText("opencode-1 is offline")).toBeInTheDocument();
+  expect(
+    within(app).getByLabelText("opencode-1 is offline"),
+  ).toBeInTheDocument();
 });
 
 test("a pushed roster frame updates the page without a reload", async () => {
   mount();
   await screen.findByText("claude-1");
   const extra = {
-    id: "a9", namespace: "repo:github.com/acme/app", name: "claude-2", kind: "claude-code" as const,
-    machineId: "m2", machineLabel: "old-thinkpad", global: false, live: true,
+    id: "a9",
+    namespace: "repo:github.com/acme/app",
+    name: "claude-2",
+    kind: "claude-code" as const,
+    machineId: "m2",
+    machineLabel: "old-thinkpad",
+    global: false,
+    live: true,
     updatedAt: new Date().toISOString(),
   };
   act(() => {
@@ -2034,9 +2306,16 @@ test("the namespace filter narrows the groups", async () => {
   const user = userEvent.setup();
   mount();
   await screen.findByText("claude-1");
-  await user.selectOptions(screen.getByLabelText("Namespace"), "repo:github.com/acme/docs");
-  expect(screen.queryByRole("region", { name: "repo:github.com/acme/app" })).not.toBeInTheDocument();
-  expect(screen.getByRole("region", { name: "repo:github.com/acme/docs" })).toBeInTheDocument();
+  await user.selectOptions(
+    screen.getByLabelText("Namespace"),
+    "repo:github.com/acme/docs",
+  );
+  expect(
+    screen.queryByRole("region", { name: "repo:github.com/acme/app" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("region", { name: "repo:github.com/acme/docs" }),
+  ).toBeInTheDocument();
 });
 
 test("a dropped stream shows a paused chip and the rows stay", async () => {
@@ -2046,7 +2325,11 @@ test("a dropped stream shows a paused chip and the rows stay", async () => {
     lastSource().push({ type: "hello" });
     lastSource().fail();
   });
-  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/live updates paused/i));
+  await waitFor(() =>
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /live updates paused/i,
+    ),
+  );
   expect(screen.getByText("claude-1")).toBeInTheDocument();
 });
 
@@ -2068,7 +2351,6 @@ pnpm --filter @ob/dashboard test -- agents.test.tsx
 ```
 
 Expected: FAIL — no region named after a namespace.
-
 - [x] **Step 3: Write the chip and the row**
 
 `apps/dashboard/src/agents/LiveChip.tsx`:
@@ -2108,7 +2390,9 @@ export function AgentRow({ agent }: { agent: Agent }) {
       <LiveChip name={agent.name} live={agent.live} />
       <span className="min-w-0 flex-1 truncate font-medium">{agent.name}</span>
       {agent.global && (
-        <span className="rounded-full bg-[var(--ob-surface-2,#f6f7f9)] px-2 py-0.5 text-xs">global</span>
+        <span className="rounded-full bg-[var(--ob-surface-2,#f6f7f9)] px-2 py-0.5 text-xs">
+          global
+        </span>
       )}
       <span className="text-xs text-[color:var(--ob-muted,#5f6670)]">
         {KIND[agent.kind] ?? agent.kind} · {agent.machineLabel}
@@ -2132,13 +2416,15 @@ import { AgentRow } from "./AgentRow";
 /** Live first, then by name; namespaces alphabetical. */
 export function groupByNamespace(agents: Agent[]): [string, Agent[]][] {
   const by = new Map<string, Agent[]>();
-  for (const a of agents) by.set(a.namespace, [...(by.get(a.namespace) ?? []), a]);
+  for (const a of agents)
+    by.set(a.namespace, [...(by.get(a.namespace) ?? []), a]);
   return [...by.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([ns, list]) => [
       ns,
       [...list].sort(
-        (x, y) => Number(y.live) - Number(x.live) || x.name.localeCompare(y.name),
+        (x, y) =>
+          Number(y.live) - Number(x.live) || x.name.localeCompare(y.name),
       ),
     ]);
 }
@@ -2157,13 +2443,18 @@ export function Agents() {
     <>
       <div className="flex items-baseline justify-between gap-4">
         <div>
-          <h1 className="text-[length:var(--ob-text-xl,1.5rem)] font-semibold">Agents</h1>
+          <h1 className="text-[length:var(--ob-text-xl,1.5rem)] font-semibold">
+            Agents
+          </h1>
           <p className="mt-1 text-sm text-[color:var(--ob-muted,#5f6670)]">
             {all.filter((a) => a.live).length} live of {all.length} connected.
           </p>
         </div>
         {!live && (
-          <span role="status" className="text-xs text-[color:var(--ob-muted,#5f6670)]">
+          <span
+            role="status"
+            className="text-xs text-[color:var(--ob-muted,#5f6670)]"
+          >
             Live updates paused
           </span>
         )}
@@ -2174,7 +2465,11 @@ export function Agents() {
       {error && (
         <div className="mt-6 rounded-[var(--ob-radius-8,8px)] border border-[var(--ob-border,#bec4cd)] p-4">
           <p className="text-sm">Couldn't load the roster.</p>
-          <button type="button" className="mt-3 underline" onClick={() => void refetch()}>
+          <button
+            type="button"
+            className="mt-3 underline"
+            onClick={() => void refetch()}
+          >
             Try again
           </button>
         </div>
@@ -2184,8 +2479,8 @@ export function Agents() {
         <div className="mt-6 rounded-[var(--ob-radius-8,8px)] border border-dashed border-[var(--ob-border,#bec4cd)] p-6">
           <p className="font-medium">No agents connected</p>
           <p className="mt-1 text-sm">
-            Start a session in a repo after running <code>npx open-bus</code>. Agents appear here as they
-            come up.
+            Start a session in a repo after running <code>npx open-bus</code>.
+            Agents appear here as they come up.
           </p>
         </div>
       )}
@@ -2211,7 +2506,9 @@ export function Agents() {
 
       {groups.map(([namespace, list]) => (
         <section key={namespace} aria-label={namespace} className="mt-6">
-          <h2 className="truncate font-mono text-sm text-[color:var(--ob-muted,#5f6670)]">{namespace}</h2>
+          <h2 className="truncate font-mono text-sm text-[color:var(--ob-muted,#5f6670)]">
+            {namespace}
+          </h2>
           <ul className="mt-1 divide-y divide-[var(--ob-divider,#e0e3e8)]">
             {list.map((a) => (
               <AgentRow key={a.id} agent={a} />
@@ -2225,7 +2522,6 @@ export function Agents() {
 ```
 
 Add `useState` to the React import at the top: `import { useState } from "react";`.
-
 - [x] **Step 5: Run the tests to verify they pass**
 
 ```bash
@@ -2234,7 +2530,6 @@ pnpm --filter @ob/dashboard typecheck
 ```
 
 Expected: 6 passing. If a pushed-frame test fails because the frame arrives before the first render, `await screen.findByText("claude-1")` must come before every `lastSource().push(...)` — the fake only holds frames that the runner has a handler for.
-
 - [x] **Step 6: Commit**
 
 ```bash
@@ -2287,13 +2582,19 @@ import { expect, type Page, test } from "@playwright/test";
 const row = (page: Page, label: string) =>
   page.getByRole("listitem").filter({ hasText: label });
 
-test("revoking a live machine removes its agents from the roster", async ({ page }) => {
+test("revoking a live machine removes its agents from the roster", async ({
+  page,
+}) => {
   await page.goto("/");
   await expect(row(page, "studio-mbp")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Revoke studio-mbp" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Revoke studio-mbp" }),
+  ).toBeVisible();
 
   await page.goto("/agents");
-  await expect(page.getByRole("listitem").filter({ hasText: "studio-mbp" })).toHaveCount(3);
+  await expect(
+    page.getByRole("listitem").filter({ hasText: "studio-mbp" }),
+  ).toHaveCount(3);
 
   await page.getByRole("link", { name: "Machines" }).click();
   await page.getByRole("button", { name: "Revoke studio-mbp" }).click();
@@ -2302,8 +2603,12 @@ test("revoking a live machine removes its agents from the roster", async ({ page
   await expect(dialog).toContainText("can't be undone");
   await dialog.getByRole("button", { name: "Revoke machine" }).click();
 
-  await expect(row(page, "studio-mbp").getByText("Revoked", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Revoke studio-mbp" })).toHaveCount(0);
+  await expect(
+    row(page, "studio-mbp").getByText("Revoked", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Revoke studio-mbp" }),
+  ).toHaveCount(0);
 
   // The spec's scenario 5: the revoked machine's agents leave the roster.
   await page.getByRole("link", { name: "Agents" }).click();
@@ -2316,25 +2621,38 @@ test("revoking a live machine removes its agents from the roster", async ({ page
 test("cancel leaves the machine alone", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Revoke studio-mbp" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
-  await expect(page.getByRole("button", { name: "Revoke studio-mbp" })).toBeVisible();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Cancel" })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Revoke studio-mbp" }),
+  ).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
 test("a revoked machine is listed but not revocable", async ({ page }) => {
   await page.goto("/");
-  await expect(row(page, "old-thinkpad").getByText("Revoked", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Revoke old-thinkpad" })).toHaveCount(0);
+  await expect(
+    row(page, "old-thinkpad").getByText("Revoked", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Revoke old-thinkpad" }),
+  ).toHaveCount(0);
 });
 
-test("the revoke dialog is keyboard-operable and focus returns", async ({ page }) => {
+test("the revoke dialog is keyboard-operable and focus returns", async ({
+  page,
+}) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Revoke studio-mbp" }).focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Revoke studio-mbp" })).toBeFocused();
+  await expect(
+    page.getByRole("button", { name: "Revoke studio-mbp" }),
+  ).toBeFocused();
 });
 
 test("no horizontal scroll at 390px", async ({ page }) => {
@@ -2342,14 +2660,15 @@ test("no horizontal scroll at 390px", async ({ page }) => {
   await page.goto("/");
   await expect(row(page, "studio-mbp")).toBeVisible();
   const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    () =>
+      document.documentElement.scrollWidth -
+      document.documentElement.clientWidth,
   );
   expect(overflow).toBe(0);
 });
 ```
 
 The focus-return and Escape cases rely on Task FE6's `RevokeDialog`, which focuses its panel on open and closes on Escape.
-
 - [x] **Step 3: Write the agents spec**
 
 `apps/dashboard/e2e/agents.spec.ts`:
@@ -2379,7 +2698,11 @@ test("agents are grouped by namespace with live dots", async ({ page }) => {
   await expect(app.getByRole("listitem")).toHaveCount(2);
   await expect(app.getByLabel("claude-1 is live")).toBeVisible();
   await expect(app.getByLabel("opencode-1 is offline")).toBeVisible();
-  await expect(page.getByRole("region", { name: "repo:github.com/acme/docs" }).getByText("global")).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "repo:github.com/acme/docs" })
+      .getByText("global"),
+  ).toBeVisible();
 });
 
 test("a live roster push lands without a reload", async ({ page }) => {
@@ -2404,8 +2727,12 @@ test("a machine disconnecting takes its agents with it", async ({ page }) => {
 test("the namespace filter narrows the view", async ({ page }) => {
   await page.goto("/agents");
   await page.getByLabel("Namespace").selectOption("repo:github.com/acme/docs");
-  await expect(page.getByRole("region", { name: "repo:github.com/acme/app" })).toHaveCount(0);
-  await expect(page.getByRole("region", { name: "repo:github.com/acme/docs" })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "repo:github.com/acme/app" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "repo:github.com/acme/docs" }),
+  ).toBeVisible();
 });
 
 test("370px smaller viewport keeps the roster readable", async ({ page }) => {
@@ -2413,7 +2740,9 @@ test("370px smaller viewport keeps the roster readable", async ({ page }) => {
   await page.goto("/agents");
   await expect(page.getByText("claude-1")).toBeVisible();
   const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    () =>
+      document.documentElement.scrollWidth -
+      document.documentElement.clientWidth,
   );
   expect(overflow).toBe(0);
 });
@@ -2435,7 +2764,9 @@ const ROUTES = ["/", "/agents"];
 
 for (const theme of ["light", "dark"] as const) {
   for (const width of [1280, 390]) {
-    test(`${theme} @${width}: no axe violations, no sideways scroll`, async ({ page }) => {
+    test(`${theme} @${width}: no axe violations, no sideways scroll`, async ({
+      page,
+    }) => {
       await page.setViewportSize({ width, height: 900 });
       await page.emulateMedia({ colorScheme: theme });
       for (const path of ROUTES) {
@@ -2450,7 +2781,9 @@ for (const theme of ["light", "dark"] as const) {
         })) as { violations: { id: string; nodes: unknown[] }[] };
         expect(result.violations.map((v) => v.id)).toEqual([]);
         const overflow = await page.evaluate(
-          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          () =>
+            document.documentElement.scrollWidth -
+            document.documentElement.clientWidth,
         );
         expect(overflow).toBe(0);
       }
@@ -2487,7 +2820,6 @@ git commit -m "test(dashboard): e2e for machines revoke, live roster, a11y and n
 - Create: `apps/dashboard/e2e/real/fixtures.ts`, `apps/dashboard/e2e/real/machines.spec.ts`, `apps/dashboard/playwright.real.config.ts`
 
 This task does not block anything. It runs once Backend's B-track has `/api/v1/machines`, `/api/v1/agents` and `/api/v1/events` on `wrangler dev`.
-
 - [x] **Step 1: Confirm Backend's routes are live**
 
 ```bash
@@ -2498,7 +2830,6 @@ curl -si localhost:8787/api/v1/machines | head -1   # expect 401 without a sessi
 ```
 
 If either 404s, stop and message OpenBus Backend with the exact route.
-
 - [x] **Step 2: Write the real config**
 
 `apps/dashboard/playwright.real.config.ts`:
@@ -2546,12 +2877,16 @@ export { expect };
 ```ts
 import { expect, test } from "./fixtures";
 
-test("a fresh instance lists no machines and offers the install command", async ({ signedIn: page }) => {
+test("a fresh instance lists no machines and offers the install command", async ({
+  signedIn: page,
+}) => {
   await expect(page.getByText(/no machines yet/i)).toBeVisible();
   await expect(page.getByText("npx open-bus")).toBeVisible();
 });
 
-test("the roster endpoint answers and the page says how many are connected", async ({ signedIn: page }) => {
+test("the roster endpoint answers and the page says how many are connected", async ({
+  signedIn: page,
+}) => {
   await page.getByRole("link", { name: "Agents" }).click();
   await expect(page.getByRole("heading", { name: "Agents" })).toBeVisible();
   await expect(page.getByText(/\d+ live of \d+ connected/)).toBeVisible();
@@ -2565,7 +2900,6 @@ pnpm --filter @ob/dashboard exec playwright test -c playwright.real.config.ts --
 ```
 
 Expected: 2 passing. A 401 on every request means the dev-login cookie didn't stick: B's cookie is `__Host-` prefixed outside dev, so this only works with `ENVIRONMENT=dev`.
-
 - [x] **Step 6: Commit**
 
 ```bash
@@ -2586,7 +2920,6 @@ git commit -m "test(dashboard): real-server smoke against wrangler dev"
 # @ob/dashboard
 
 The OpenBus dashboard: machines (with revoke) and the live agents/namespaces view.
-
 - `pnpm dev` — Vite on :5173 against your instance (proxies `/api`, `/auth` in `vite.config.ts`).
 - `VITE_MOCK=1 pnpm dev` — no server: MSW serves `src/mocks/` (two machines, two namespaces).
   `window.__obMock` pushes roster frames, for e2e.
@@ -2608,11 +2941,9 @@ pnpm --filter @ob/dashboard build
 ```
 
 Expected: all green, and `dist/` contains no `mockServiceWorker.js`.
-
 - [x] **Step 3: Report to openbus-e0 in three lines or fewer**
 
 State: what shipped (FE1–FE10), which contract entries were consumed or changed, and what is blocked (e.g. real-server smoke waiting on B).
-
 - [x] **Step 4: Commit**
 
 ```bash
@@ -2626,17 +2957,17 @@ git commit -m "docs(dashboard): dashboard README and FE track status"
 
 **Spec coverage**
 
-| Spec requirement | Task |
-|---|---|
-| Machines page with revoke (§ Login 3, Verification 5) | FE6 (UI), FE2 (idempotent optimistic DELETE), FE8 (`machines.spec.ts`, the pinned test for review focus #4) |
-| Revoked machine's agents leave the roster (Verification 5) | FE4 (mock bus emits a new snapshot), FE8 (e2e asserts rows are gone), FE7 (SSE applies it) |
-| Live view of agents and namespaces (§ Goals 1, 5) | FE7 (grouping, global badge, live dot, filter), FE3 (SSE), FE8 (`agents.spec.ts`) |
+| Spec requirement                                            | Task                                                                                                              |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Machines page with revoke (§ Login 3, Verification 5)       | FE6 (UI), FE2 (idempotent optimistic DELETE), FE8 (`machines.spec.ts`, the pinned test for review focus #4)       |
+| Revoked machine's agents leave the roster (Verification 5)  | FE4 (mock bus emits a new snapshot), FE8 (e2e asserts rows are gone), FE7 (SSE applies it)                        |
+| Live view of agents and namespaces (§ Goals 1, 5)           | FE7 (grouping, global badge, live dot, filter), FE3 (SSE), FE8 (`agents.spec.ts`)                                 |
 | Isolation is not a UI concern, but must not be implied away | FE7 shows only what `GET /api/v1/agents` returns; no client-side namespace expansion, no cross-namespace "search" |
-| Device approval page | **Not FE** — Worker-rendered by Backend; the FE only links sign-in to `AUTH.login` with `next` (FE5) |
-| Landing + `llms.txt` | **Not FE** — Design's D-track |
-| Stack mirrors open-artifacts (§ Tech and ops) | F1 scaffold; FE1–FE8 use Vite/React/TanStack/Tailwind/MSW/Playwright in OA's shapes |
-| Dashboard layout within Design's direction | FE5/FE6/FE7 use `--ob-*` tokens with literal fallbacks; Design's screens replace markup, not behavior |
-| Verification 6 (another namespace invisible) | FE8 `agents.spec.ts` filter test; real isolation is Backend's `hub.namespace.matrix.test.ts` |
+| Device approval page                                        | **Not FE** — Worker-rendered by Backend; the FE only links sign-in to `AUTH.login` with `next` (FE5)              |
+| Landing + `llms.txt`                                        | **Not FE** — Design's D-track                                                                                     |
+| Stack mirrors open-artifacts (§ Tech and ops)               | F1 scaffold; FE1–FE8 use Vite/React/TanStack/Tailwind/MSW/Playwright in OA's shapes                               |
+| Dashboard layout within Design's direction                  | FE5/FE6/FE7 use `--ob-*` tokens with literal fallbacks; Design's screens replace markup, not behavior             |
+| Verification 6 (another namespace invisible)                | FE8 `agents.spec.ts` filter test; real isolation is Backend's `hub.namespace.matrix.test.ts`                      |
 
 **Gaps accepted, with reasons:** no message history or "send a test message" button (non-goal: message history; nothing to show without the daemon). No machine rename or token reissue (not in the spec's REST routes). No pagination (one owner, tens of machines/agents).
 
@@ -2672,11 +3003,11 @@ git commit -m "docs(dashboard): dashboard README and FE track status"
 
 ## AC6 dependencies
 
-| Needs | From | Blocks |
-|---|---|---|
-| AC1 exports in `@ob/shared/web` (names assumed below) | Backend | AC6.1 |
+| Needs                                                                      | From    | Blocks                                                     |
+| -------------------------------------------------------------------------- | ------- | ---------------------------------------------------------- |
+| AC1 exports in `@ob/shared/web` (names assumed below)                      | Backend | AC6.1                                                      |
 | AC2 roles REST, AC3 status on rows, AC4 linked-apps REST and `/link` route | Backend | AC6.2–AC6.5 against the real server; mocks unblock UI work |
-| AC6 screens: roles editor, status column, Linked apps, link confirm | Design | final markup of AC6.2–AC6.5 |
+| AC6 screens: roles editor, status column, Linked apps, link confirm        | Design  | final markup of AC6.2–AC6.5                                |
 
 AC1 names (confirmed by Backend 2026-10-29), all re-exported only through `contract.ts` (a rename is one edit there): `AgentStatusSchema` (the four values), `AgentSchema` gaining `role?`, `status?`, `statusLabel?`, `statusAt?`; `RoleSchema {namespace, role, agentId: string|null, setAt}`, `RolesResponseSchema {roles}`, `PutRoleBodySchema {agentId}`; `LinkedAppSchema {aud, linkedAt}`, `LinkedAppsResponseSchema {apps}`; `R.roles`, `R.role(ns, role)`, `R.linkedApps`, `R.linkedApp(aud)` (the last URL-encodes `aud`).
 
@@ -2718,7 +3049,6 @@ AC1 names (confirmed by Backend 2026-10-29), all re-exported only through `contr
 **Files:** Modify `src/agents/AgentRow.tsx`, `src/agents/RosterTable.tsx`; Test `test/agents.test.tsx`.
 
 **Interfaces:** Consumes `Agent.status?`, `statusLabel?`, `statusAt?`. Produces `StatusCell({agent})` in `src/agents/StatusCell.tsx`.
-
 - [ ] **Step 1:** failing tests:
   - header reads "Status (agent says)"; a `blocked` agent with label "waiting on CI" shows "Blocked", "waiting on CI" and an `ago()` time;
   - `waiting_on_owner` shows "Waiting on you";
@@ -2735,7 +3065,6 @@ AC1 names (confirmed by Backend 2026-10-29), all re-exported only through `contr
 **Files:** Create `src/roles/Roles.tsx`, `src/roles/RoleDialog.tsx`, `src/roles/RemoveRoleDialog.tsx`; modify `src/router.tsx`, `src/layout/AppLayout.tsx`; Test `test/roles.test.tsx`.
 
 **Interfaces:** Consumes AC6.1 hooks and `useAgents`. Produces route `/roles`, nav item "Roles" with count.
-
 - [ ] **Step 1:** failing tests:
   - list shows `lane-6 → code-96` with namespace and holder state (Live, Queued, or **Vacant** when the holder is absent from agents);
   - "Add role" dialog: namespace select, name input (rejects invalid `BusNameSchema` client-side), holder select listing only open agents in that namespace plus global ones; submit PUTs and closes;
@@ -2752,7 +3081,6 @@ AC1 names (confirmed by Backend 2026-10-29), all re-exported only through `contr
 ### Task AC6.4: Linked apps
 
 **Files:** Create `src/settings/Settings.tsx`, `src/settings/UnlinkDialog.tsx`; modify `src/router.tsx`, `src/layout/AppLayout.tsx`; Test `test/settings.test.tsx`.
-
 - [ ] **Step 1:** failing tests: list shows each `aud` as text (not a link) and "Linked <day>"; "Unlink https://oa.example" confirms ("<aud> can no longer verify your agents' cards. Cards it already has expire within 5 minutes."), removes the row, restores it with a toast on 500; empty state "No linked apps. Link one from the app's settings."; a punycode `aud` renders verbatim.
 - [ ] **Step 2:** run `vitest run test/settings.test.tsx`; expect FAIL.
 - [ ] **Step 3:** implement.
@@ -2763,7 +3091,6 @@ AC1 names (confirmed by Backend 2026-10-29), all re-exported only through `contr
 **Files:** Create `apps/server/src/routes/link-page.ts`; Test `apps/server/test/link-page.test.ts`. Backend's AC4c owns `/link` (validation, `ob_link` cookie, POST confirm, and the CSP header whose form-action allows `aud`) and calls this renderer. Signatures agreed with Backend 2026-10-29.
 
 **Interfaces:** Produces `renderLinkConfirm(v: PageBase & { aud: string; action: string; csrf: string }): string` and `renderLinkError(v: PageBase, reason: "bad_request" | "expired"): string`, reusing `esc`, `shell` and `STYLE` from `approve-page.ts` (export what's needed there; no copy).
-
 - [ ] **Step 1:** failing tests: the confirm page contains "Let https://oa.example verify your agents' cards?", the signed-in email, a POST form to `action` with the CSRF hidden field, "Allow" and "Cancel"; an `aud` of `https://a"><script>` is escaped; no `<script`, no `http` URL other than the form action; size < 8 KB; the error page names no `aud`.
 - [ ] **Step 2:** run `pnpm --filter @ob/server exec vitest run test/link-page.test.ts`; expect FAIL.
 - [ ] **Step 3:** implement from Design's link-confirm screen.
@@ -2772,7 +3099,6 @@ AC1 names (confirmed by Backend 2026-10-29), all re-exported only through `contr
 ### Task AC6.6: E2E, a11y and real smoke
 
 **Files:** Create `apps/dashboard/e2e/roles.spec.ts`, `e2e/settings.spec.ts`; modify `e2e/a11y.spec.ts`, `e2e/real/smoke.spec.ts`.
-
 - [ ] **Step 1:** mocked specs: add, re-point and remove a role; unlink an app; status column visible at 1280 and 390 with a 64-char label. axe clean on Roles, Settings and the Add-role dialog, light and dark, 1280 and 390.
 - [ ] **Step 2:** real smoke (read-only): `/roles` and `/settings` render and `GET /api/v1/roles` and `/linked-apps` return 200; no console or CSP errors.
 - [ ] **Step 3:** run `pnpm --filter @ob/dashboard exec playwright test e2e/roles.spec.ts e2e/settings.spec.ts e2e/a11y.spec.ts` (load < 40); expect all pass in Chromium and WebKit.
@@ -2780,15 +3106,15 @@ AC1 names (confirmed by Backend 2026-10-29), all re-exported only through `contr
 
 ## AC6 self-review
 
-| Spec requirement | Task |
-|---|---|
-| Owner points a role at a live agent in the dashboard (Goal 1) | AC6.3 |
-| Scoping: holder open, same namespace or global (Role labels) | AC6.3 picker; server enforces (AC2) |
-| Closed holder ⇒ vacant, never follows (Anti-goals) | AC6.3, decision 2 |
-| Status column tagged "agent says" (Goal 2, Status read side) | AC6.2 |
-| Status within 2 s / last value of a burst (Verification) | feed already applies agent rows; AC6.2 feed test; timing is Backend's |
-| `GET`/`DELETE` linked apps, unlink (Linking) | AC6.1, AC6.4 |
-| Confirm page "Let <aud> verify your agents' cards?" (Linking step 3) | AC6.5 |
-| Older tabs ignore new fields (Status read side) | optional fields; AC6.2 unknown-state test |
+| Spec requirement                                                     | Task                                                                  |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Owner points a role at a live agent in the dashboard (Goal 1)        | AC6.3                                                                 |
+| Scoping: holder open, same namespace or global (Role labels)         | AC6.3 picker; server enforces (AC2)                                   |
+| Closed holder ⇒ vacant, never follows (Anti-goals)                   | AC6.3, decision 2                                                     |
+| Status column tagged "agent says" (Goal 2, Status read side)         | AC6.2                                                                 |
+| Status within 2 s / last value of a burst (Verification)             | feed already applies agent rows; AC6.2 feed test; timing is Backend's |
+| `GET`/`DELETE` linked apps, unlink (Linking)                         | AC6.1, AC6.4                                                          |
+| Confirm page "Let <aud> verify your agents' cards?" (Linking step 3) | AC6.5                                                                 |
+| Older tabs ignore new fields (Status read side)                      | optional fields; AC6.2 unknown-state test                             |
 
 Out of FE scope: `/link` validation and cookie, card signing, JWKS (Backend AC4); OA's half.

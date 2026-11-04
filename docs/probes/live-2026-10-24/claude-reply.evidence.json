@@ -12,9 +12,7 @@
     "lines": [
       "{\"msgV\":1,\"msg_id\":\"8b163d02-1600-44cd-927e-474cf11f64e0\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<cross-session-message from=\\\"uds:/tmp/cc-socks/98947.sock\\\" hop-chain=\\\"e8c2fcc91fe2c402c7b2278b\\\" from-name=\\\"peer-64\\\" from-mode=\\\"prompting\\\">\\nOPENBUS-L1-RAW\\n</cross-session-message>\"},\"priority\":\"next\",\"from\":\"uds:/tmp/cc-socks/98947.sock\"}"
     ],
-    "frameTypes": [
-      "user"
-    ],
+    "frameTypes": ["user"],
     "compare": {
       "type": {
         "got": "user",
@@ -34,10 +32,7 @@
       "wrapperFrom": "uds:/tmp/cc-socks/98947.sock",
       "role": "user",
       "msgIdEchoesInjected": false,
-      "otherKeys": [
-        "msgV",
-        "priority"
-      ]
+      "otherKeys": ["msgV", "priority"]
     }
   },
   "transport": {

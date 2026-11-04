@@ -31,7 +31,6 @@ import {
   holdsFileLinux,
   type Proc,
   psRows,
-  staleRefusal,
 } from "../src/codex-attest.ts";
 import { daemonHarness, hello, stopAll } from "./helpers.ts";
 
@@ -910,26 +909,25 @@ describe("codex code-mode attestation (C27)", () => {
     expect(check.attestNow(codeHello())).toEqual(ok);
   });
 
-  it("names both versions when the hello's marker shows the adapter is older (C27k)", async () => {
+  it("tells only an adapter older than 0.61.1 (or with no marker) to restart; a newer one is refused as before (C27k)", async () => {
     const { home } = cmHome();
-    const check = codexAttestor({ home, ...fakeProcs(), version: "0.61.1" });
-    const old = codexHello(
-      { thread_id: CM_THREAD, call_id: EXEC1, turn_id: TURN },
-      { agent_ref: CM_THREAD, client_version: "0.61.0" },
-    );
-    expect(check.attestNow(old)).toEqual({
-      ok: false,
-      reason:
-        "its OpenBus server (0.61.0) is older than the daemon (0.61.1). Ask the user to restart the Codex app.",
-    });
-    // Not older, absent, odd, or a dev build: the plain text.
-    for (const [client, daemon] of [
-      ["0.61.1", "0.61.1"],
-      [undefined, "0.61.1"],
-      ["0.61.0-x", "0.61.1"],
-      ["0.61.0", "0.0.0"],
-    ] as const)
-      expect(staleRefusal(client, daemon)).toBe(CODEX_REFUSALS.staleAdapter);
+    const check = codexAttestor({ home, ...fakeProcs() });
+    const as = (client_version: string | undefined) =>
+      check.attestNow(
+        codexHello(
+          { thread_id: CM_THREAD, call_id: EXEC1, turn_id: TURN },
+          { agent_ref: CM_THREAD, client_version },
+        ),
+      );
+    for (const v of [undefined, "0.61.0", "0.45.0", "0.61.1-rc.1", "0.0.0"])
+      expect(as(v), String(v)).toEqual({
+        ok: false,
+        reason: CODEX_REFUSALS.staleAdapter,
+      });
+    for (const v of ["0.61.1", "0.62.0", "1.0.0", "not-a-version"])
+      expect(as(v), v).toEqual(no);
+    // Nothing was admitted or spent.
+    expect(check.attestNow(codeHello())).toEqual(ok);
   });
 
   it("keeps a function_call id with no item id as before (C27k)", async () => {

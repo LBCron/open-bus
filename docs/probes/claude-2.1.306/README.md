@@ -10,11 +10,11 @@ All three start a headless peer with stdin held open (`--input-format stream-jso
 wait for `~/.claude/sessions/<pid>.json`, and read its `peerToken` from the
 sibling `.key`. Nothing is installed on Claude's side.
 
-| script | question | evidence |
-|---|---|---|
-| `probe.mjs` | Does a native `SendMessage` reply reach a return socket with **no** session file? | `return-socket.evidence.json` |
-| `status-probe.mjs` | Does plain delivery produce `peer_message_status`? | `status.evidence.json` |
-| `wake-probe.mjs` | Does injection alone start a turn, with no tick prompt? | printed |
+| script             | question                                                                          | evidence                      |
+| ------------------ | --------------------------------------------------------------------------------- | ----------------------------- |
+| `probe.mjs`        | Does a native `SendMessage` reply reach a return socket with **no** session file? | `return-socket.evidence.json` |
+| `status-probe.mjs` | Does plain delivery produce `peer_message_status`?                                | `status.evidence.json`        |
+| `wake-probe.mjs`   | Does injection alone start a turn, with no tick prompt?                           | printed                       |
 
 Run from this directory with `node probe.mjs`, etc. Each needs an authenticated
 `claude` on `PATH` and writes/removes only its own `~/.claude/sessions` entries
@@ -24,12 +24,11 @@ Run from this directory with `node probe.mjs`, etc. Each needs an authenticated
 
 `probe.mjs`, three variants against one peer:
 
-| variant | files in `~/.claude/sessions` | connected | native reply | auth first | status-back |
-|---|---|---|---|---|---|
-| bare | none | yes | yes | no | no |
-| key-only | `.key` only | yes | yes | no | no |
-| control | `.key` + `.json` | yes | yes | no | no |
-
+| variant  | files in `~/.claude/sessions` | connected | native reply | auth first | status-back |
+| -------- | ----------------------------- | --------- | ------------ | ---------- | ----------- |
+| bare     | none                          | yes       | yes          | no         | no          |
+| key-only | `.key` only                   | yes       | yes          | no         | no          |
+| control  | `.key` + `.json`              | yes       | yes          | no         | no          |
 - **Bare wins.** Claude dials an arbitrary `from=uds:<path>` anonymously and
   delivers its reply as a `type:user` frame from its own socket. No session
   file, no key file, nothing visible in `ListAgents`.

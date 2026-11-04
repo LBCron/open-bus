@@ -4,12 +4,12 @@ Public (no Access gate). Worker `open-bus-staging` on the custom domain `https:/
 
 ## Resources (no secrets)
 
-| Resource | Name | Notes |
-|---|---|---|
-| Worker | `open-bus-staging` | name pinned in `apps/server/wrangler.jsonc` (02-backend.md) |
-| Durable Object | `Hub` | created by the migrations in `wrangler.jsonc` at deploy |
-| Custom domain | `staging.open-bus.ai` | `routes: [{ "pattern": "staging.open-bus.ai", "custom_domain": true }]` in `wrangler.jsonc`; the deploy creates the DNS record |
-| Access SaaS app | `open-bus-staging` | the owner login, created by `pnpm ob:setup`; its team domain and client id are the `STAGING_*` vars below |
+| Resource        | Name                  | Notes                                                                                                                          |
+| --------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Worker          | `open-bus-staging`    | name pinned in `apps/server/wrangler.jsonc` (02-backend.md)                                                                    |
+| Durable Object  | `Hub`                 | created by the migrations in `wrangler.jsonc` at deploy                                                                        |
+| Custom domain   | `staging.open-bus.ai` | `routes: [{ "pattern": "staging.open-bus.ai", "custom_domain": true }]` in `wrangler.jsonc`; the deploy creates the DNS record |
+| Access SaaS app | `open-bus-staging`    | the owner login, created by `pnpm ob:setup`; its team domain and client id are the `STAGING_*` vars below                      |
 
 No D1, R2 or KV (spec §Architecture: not used). Config: `apps/server/wrangler.jsonc` —
 single-env, top-level `vars`, Durable Object migrations applied by `wrangler deploy`
@@ -17,12 +17,12 @@ itself. There is no `--env staging` anywhere.
 
 ## GitHub secrets
 
-| Secret | Used by | Needed for |
-|---|---|---|
-| `CLOUDFLARE_API_TOKEN` | deploy-staging | Account \| Workers Scripts: Edit; Account \| Access: Apps and Policies: Edit; Zone \| Workers Routes: Edit and Zone \| DNS: Edit on `open-bus.ai` and `leourbina.com` |
-| `CLOUDFLARE_ACCOUNT_ID` | deploy-staging | the account owning the Worker |
-| `RELEASE_APP_ID` | release-please, release-cadence | the release GitHub App |
-| `RELEASE_APP_PRIVATE_KEY` | release-please, release-cadence | same |
+| Secret                    | Used by                         | Needed for                                                                                                                                                            |
+| ------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN`    | deploy-staging                  | Account \| Workers Scripts: Edit; Account \| Access: Apps and Policies: Edit; Zone \| Workers Routes: Edit and Zone \| DNS: Edit on `open-bus.ai` and `leourbina.com` |
+| `CLOUDFLARE_ACCOUNT_ID`   | deploy-staging                  | the account owning the Worker                                                                                                                                         |
+| `RELEASE_APP_ID`          | release-please, release-cadence | the release GitHub App                                                                                                                                                |
+| `RELEASE_APP_PRIVATE_KEY` | release-please, release-cadence | same                                                                                                                                                                  |
 
 All four are tracked as blocker issue #4. Until the release App secrets exist, release-please skips with a notice instead of failing. Never put a secret in an issue or a PR:
 ask for `! gh secret set …` instead (`scripts/ob-blocker.sh` files the request).
@@ -109,7 +109,6 @@ The `robots` and `login` checks return when the landing and the Access login exi
 ## Repo settings
 
 Live since 2026-10-23 (task F4d; set by the user from blocker #16):
-
 - **Ruleset `main`** (active, `refs/heads/main`, `bypass_actors: []`: admins are held
   to the same rules, 00-overview §Delivery):
   - no deletion, no force-push; a pull request for every change (0 approvals)

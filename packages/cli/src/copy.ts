@@ -270,8 +270,8 @@ export function copy(style: Style) {
               ),
               next("Run npx @open-bus/cli install."),
             ],
-    // After the daemon line, when Codex is configured and the daemon is new
-    // or another version: open threads keep their old adapter (C27k).
+    // After the daemon line, when Codex is configured: open threads keep
+    // their old adapter, or have none (C27k).
     codexRestart: () =>
       next(
         "Restart the Codex app and open Codex sessions to load the new OpenBus.",

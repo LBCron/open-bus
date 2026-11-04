@@ -195,7 +195,7 @@ docs/security/2026-review.md                 I8
   - "5: revoking a machine closes its socket with 4403 and its agents leave the roster" (reconnect refused; mail to its agents `refused: revoked`).
   - "6: another namespace is invisible and unreachable; a global agent reaches both" (`refused: unknown_agent`, since another namespace is invisible; `other_namespace` is only for an explicit `to_namespace` (B8 ruling); the global agent appears in both rosters).
 - [ ] **Step 2: Run** `pnpm e2e:staging` three times, and `E2E_SLOW=1 pnpm e2e:staging -t 4b` once. Expected: PASS.
-- [ ] **Step 3: Adversarial pass.** Dispatch three reviewers in parallel, each with the spec, 00-overview §Review Focus and the repo: **hub and auth** (from_ref, token hash, revoke races, device-code brute force, CSRF on approve), **client** (local socket permissions, attestation, pid reuse, OpenCode `_meta`), **install** (setup idempotence, token files, CI secret handling). Brief: *"Your job is to break this. Find inputs, sequences, or environments where it fails, leaks across namespaces, spoofs identity, double-delivers, or contradicts the spec. Write the failing test for each finding."* Each finding goes to its owning lead; record issue, severity, fix and pinning test in `docs/security/2026-review.md`.
+- [ ] **Step 3: Adversarial pass.** Dispatch three reviewers in parallel, each with the spec, 00-overview §Review Focus and the repo: **hub and auth** (from_ref, token hash, revoke races, device-code brute force, CSRF on approve), **client** (local socket permissions, attestation, pid reuse, OpenCode `_meta`), **install** (setup idempotence, token files, CI secret handling). Brief: _"Your job is to break this. Find inputs, sequences, or environments where it fails, leaks across namespaces, spoofs identity, double-delivers, or contradicts the spec. Write the failing test for each finding."_ Each finding goes to its owning lead; record issue, severity, fix and pinning test in `docs/security/2026-review.md`.
 - [ ] **Step 4: Report M2** to `openbus-e0`; publish the review summary page for the user (artifacts.leourbina.com, information only).
 - [ ] **Step 5: Commit.** `test(e2e): staging scenarios 4-6 and security review (I8)`. Branch `in/i8-scenarios-m2`.
 
@@ -220,7 +220,6 @@ docs/security/2026-review.md                 I8
 Spec: `docs/superpowers/specs/2026-10-29-agent-card-design.md`, "Keys". Backend owns AC4 itself: signing, JWKS and the link flow. Platform owns the keys' life cycle.
 
 **Contract with Backend (agree before Step 1):**
-
 - **Worker secrets:**
   - `CARD_SIGNING_KEY` is the current private Ed25519 JWK (`kty: OKP`, `crv: Ed25519`, `x`, `d`, `kid`, `alg: EdDSA`).
   - `CARD_SIGNING_KEY_PREV` is the previous key's public JWK only, with no `d`. It is absent before the first rotation. Old cards only need verifying, never signing.
@@ -243,7 +242,6 @@ Spec: `docs/superpowers/specs/2026-10-29-agent-card-design.md`, "Keys". Backend 
 - Test: `scripts/setup/test/{secrets,card-key}.test.ts`, `scripts/ci/prod-setup.test.ts` and `apps/server/test/card-key-guard.test.ts`.
 
 **Steps:**
-
 - [ ] **Step 1: Write the failing tests.**
   - **`card-key.test.ts`:**
     - "generates an Ed25519 private JWK with a timestamped kid". `crypto.subtle` signs and verifies with it.
@@ -286,7 +284,7 @@ Spec: `docs/superpowers/specs/2026-10-29-agent-card-design.md`, "Keys". Backend 
   1. Set a role on staging.
   2. On a daemon below the gate (0.53), check that the roster decodes and no row carries `role`.
   3. On a 0.55 daemon, check that the same row carries `role`.
-  Record both rosters, with names only, in the PR or issue that closes AC2b. Until AC2b, no role can be set, so prod has nothing to withhold.
+     Record both rosters, with names only, in the PR or issue that closes AC2b. Until AC2b, no role can be set, so prod has nothing to withhold.
 - [ ] **Step 6: Prod gets its own keys** from the next CI upgrade, through the additive secrets path. The manager and the user deploy prod, never Platform's session. After-check: prod's JWKS `kid` differs from staging's, and neither key's `x` is `TEST_CARD_KEY_X`.
 - [ ] **Step 7: Docs.**
   - `docs/ops/releases.md` gets a "Card keys" section: generation, rotation (`--rotate-card-key`, the 24 h guard, `--force`) and the never-rotated salt.
@@ -297,14 +295,14 @@ Spec: `docs/superpowers/specs/2026-10-29-agent-card-design.md`, "Keys". Backend 
 
 ## Human gates (filed with `scripts/ob-blocker.sh` when the task reaches them)
 
-| Gate | Task | Ask |
-|---|---|---|
-| CF token + account id (issue #4) | I3 Step 5, I4 | already filed |
-| Access API token for staging | I4 Step 1 | save to `~/.openbus/open-bus-staging-access-token` via the `saveCommand` line |
-| One Access login for e2e | I7 | a Playwright storage state, captured by the user once |
-| `NPM_TOKEN` | I5 | `! gh secret set NPM_TOKEN …` |
-| Prod Access token, owner email | I9 Step 3 | as the setup prompts |
-| A fresh Cloudflare account | I9 Step 4 | the user creates it and approves in the browser |
+| Gate                             | Task          | Ask                                                                           |
+| -------------------------------- | ------------- | ----------------------------------------------------------------------------- |
+| CF token + account id (issue #4) | I3 Step 5, I4 | already filed                                                                 |
+| Access API token for staging     | I4 Step 1     | save to `~/.openbus/open-bus-staging-access-token` via the `saveCommand` line |
+| One Access login for e2e         | I7            | a Playwright storage state, captured by the user once                         |
+| `NPM_TOKEN`                      | I5            | `! gh secret set NPM_TOKEN …`                                                 |
+| Prod Access token, owner email   | I9 Step 3     | as the setup prompts                                                          |
+| A fresh Cloudflare account       | I9 Step 4     | the user creates it and approves in the browser                               |
 
 ## Dependencies on other tracks
 

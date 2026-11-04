@@ -22,15 +22,15 @@ git -C ~/code/projects/openartifacts show ffba1e53:biome.json > biome.json
 
 Then apply this replacement table wherever the text appears:
 
-| Find | Replace |
-|---|---|
-| `open-artifacts-ai/open-artifacts` | `open-artifacts-ai/open-bus` |
-| `@oa/` | `@ob/` |
-| `oa:` (script name, as in `pnpm oa:setup`) | `ob:` |
-| `oa-` (file/script name, as in `oa-blocker.sh`) | `ob-` |
-| `OA_` (env var prefix) | `OB_` |
-| `Open Artifacts` (prose) | `OpenBus` |
-| `open-artifacts` (slugs, worker names) | `open-bus` |
+| Find                                            | Replace                      |
+| ----------------------------------------------- | ---------------------------- |
+| `open-artifacts-ai/open-artifacts`              | `open-artifacts-ai/open-bus` |
+| `@oa/`                                          | `@ob/`                       |
+| `oa:` (script name, as in `pnpm oa:setup`)      | `ob:`                        |
+| `oa-` (file/script name, as in `oa-blocker.sh`) | `ob-`                        |
+| `OA_` (env var prefix)                          | `OB_`                        |
+| `Open Artifacts` (prose)                        | `OpenBus`                    |
+| `open-artifacts` (slugs, worker names)          | `open-bus`                   |
 
 Per-task DROP and ADAPT notes below override the table. A copied file that ships with a test (`*.test.ts`) is verified by that test: copy both, adapt both, the test must pass.
 
@@ -131,7 +131,10 @@ function workspaceDirs(): string[] {
     if (!existsSync(base)) continue;
     for (const name of readdirSync(base)) {
       const dir = join(base, name);
-      if (statSync(dir).isDirectory() && existsSync(join(dir, "package.json"))) {
+      if (
+        statSync(dir).isDirectory() &&
+        existsSync(join(dir, "package.json"))
+      ) {
         dirs.add(`${rel}/${name}`);
       }
     }
@@ -177,7 +180,6 @@ describe("workspace", () => {
 pnpm dlx vitest run scripts/check-workspace.test.ts
 ```
 Expected: FAIL — `ENOENT: pnpm-workspace.yaml` (and `package.json`).
-
 - [ ] **Step 4: Write the scaffold**
 
 `package.json`:
@@ -264,7 +266,6 @@ export default defineConfig({
 ```
 
 `LICENSE`: the MIT text from OA's `LICENSE` (pinned commit) with the copyright line changed to `Copyright (c) 2026 Open Bus contributors`.
-
 - [ ] **Step 5: Copy the three verbatim configs**
 
 ```bash
@@ -281,14 +282,12 @@ pnpm exec biome check --write .
 pnpm exec vitest run scripts/check-workspace.test.ts
 ```
 Expected: `pnpm install` writes `pnpm-lock.yaml`; the suite passes (the two `it.each` blocks run zero cases until packages land).
-
 - [ ] **Step 7: Full verification**
 
 ```bash
 pnpm lint && pnpm typecheck && pnpm test
 ```
 Expected: all exit 0. If `pnpm test` fails on `--filter @ob/shared`, apply the documented fallback in Step 4 and note it in the PR.
-
 - [ ] **Step 8: Commit, PR, merge**
 
 ```bash
@@ -396,7 +395,6 @@ describe("ob-blocker.sh", () => {
 pnpm exec vitest run scripts/ob-blocker.test.ts
 ```
 Expected: FAIL — `scripts/ob-blocker.sh` does not exist.
-
 - [ ] **Step 4: Write the script**
 
 Create `scripts/ob-blocker.sh` (OA's `oa-blocker.sh` shape: issue labelled `blocker`, assigned `leourbina`. Differences: repo renamed, the OA project-board step is dropped because OpenBus has no project yet, and the label is created if missing):
@@ -437,7 +435,6 @@ chmod +x scripts/ob-blocker.sh
 pnpm exec vitest run scripts/ob-blocker.test.ts
 ```
 Expected: PASS (2 tests).
-
 - [ ] **Step 6: Write CONTRIBUTING.md**
 
 Create `CONTRIBUTING.md`:
@@ -528,15 +525,15 @@ daemon per machine. Spec: `docs/superpowers/specs/2026-10-21-openbus-design.md`.
 
 ## Plans and tracks
 
-| Plan | Track | Owner |
-|---|---|---|
-| `00-overview.md` | rules, contracts, milestones | openbus-e0 |
-| `01-foundation.md` | F1–F4 scaffold, test harness, CI/CD, staging | OpenBus Platform (F2: Backend) |
-| `02-backend.md` | B* Worker, auth, device flow, hub DO | OpenBus Backend |
-| `03-design.md` | D* Studio direction, `--ob-*` tokens, screens | OpenBus Design |
-| `04-frontend.md` | FE* dashboard | OpenBus Frontend |
-| `05-client.md` | C* cli, daemon, adapters, packaging | OpenBus Frontend-2 |
-| `06-integration.md` | I* staging scenarios, install, npm, prod | OpenBus Platform |
+| Plan                | Track                                         | Owner                          |
+| ------------------- | --------------------------------------------- | ------------------------------ |
+| `00-overview.md`    | rules, contracts, milestones                  | openbus-e0                     |
+| `01-foundation.md`  | F1–F4 scaffold, test harness, CI/CD, staging  | OpenBus Platform (F2: Backend) |
+| `02-backend.md`     | B* Worker, auth, device flow, hub DO          | OpenBus Backend                |
+| `03-design.md`      | D* Studio direction, `--ob-*` tokens, screens | OpenBus Design                 |
+| `04-frontend.md`    | FE* dashboard                                 | OpenBus Frontend               |
+| `05-client.md`      | C* cli, daemon, adapters, packaging           | OpenBus Frontend-2             |
+| `06-integration.md` | I* staging scenarios, install, npm, prod      | OpenBus Platform               |
 
 Each lead writes its own track file with superpowers:writing-plans and sends the
 manager its path before starting. Coordination is over SendMessage by session name.
@@ -572,7 +569,6 @@ OpenBus connects all of one person's AI coding agents — Claude Code, OpenCode 
 Pi, on any machine — so they can see each other and message each other. Self-hosted:
 one Worker, one hub Durable Object per owner, one daemon per machine, on your own
 Cloudflare account.
-
 - Repo: https://github.com/open-artifacts-ai/open-bus
 - Spec: [`docs/superpowers/specs/2026-10-21-openbus-design.md`](docs/superpowers/specs/2026-10-21-openbus-design.md)
 - Plans: [`docs/superpowers/plans/2026-10-21-openbus/`](docs/superpowers/plans/2026-10-21-openbus/)
@@ -597,7 +593,6 @@ MIT
 pnpm lint && pnpm typecheck && pnpm test
 ```
 Expected: all exit 0.
-
 - [ ] **Step 10: Commit, PR, merge**
 
 ```bash
@@ -632,7 +627,6 @@ gh pr merge --squash --auto
 - Create: `packages/shared/` (`package.json` name `@ob/shared`, `src/`, `test/`, `tsconfig.json`, `tsconfig.typecheck.json`, `vitest.config.ts` — the package shape copied from OA's `packages/auth-core` @ `ffba1e53`)
 
 **Deliverables** (all values frozen by 00-overview §"Contracts", encoding is Backend's):
-
 - [ ] Zod 4 schemas for every daemon ↔ hub wire frame (`hello`, `agent_up`, `agent_ok`, `agent_down`, `sessions`, `send`, `receipt`, `ack`, `list`, `roster`, `fetch`, `body`, `deliver`, `receipt_update`, `roster_changed`), each with `v: 1` and a correlation `id`.
 - [ ] Zod schemas for the REST DTOs (`/healthz`, `/device/code`, `/device/token`, `/approve/:user_code`, `/api/v1/me`, `/api/v1/machines`, `/api/v1/agents`, `/api/v1/events`).
 - [ ] `newId()`: 16-char base58 (OA's `packages/provision` idiom), `newMachineToken()` returning `ob_machine_` + 32 base58 chars and its SHA-256 hash.
@@ -686,7 +680,6 @@ gh pr merge --squash --auto
 - DEFER to 06-integration: `prod-setup.sh` + `prod-setup.test.ts`. They drive `ob:setup` (`scripts/setup`), whose CLI flags 06 defines; `release-please.yml`'s `deploy-prod` job is gated on `vars.PROD_ENABLED`, which 06 sets when the script exists. (Original plan said copy-and-adapt here; the flags cannot be written correctly before `scripts/setup` exists.)
 
 **Config contract (from 02-backend.md):** `apps/server/wrangler.jsonc` is single-env — top-level `vars`, no `env.staging` block, `interface Env` in `apps/server/src/env.ts`. So the scripts use `-c wrangler.jsonc` with **no `--env staging`**, and the secret helpers accept both var shapes (`configVars()` unions top-level `vars` with `env.staging.vars`, so an OA-shaped config works too). `ENV_TS` and `WRANGLER_CONFIG` env overrides let the tests run hermetically against fixtures — no suite reads real Worker files at import time.
-
 - [ ] **Step 1: Branch `fo/f4b-staging-scripts`.**
 - [ ] **Step 2: Copy the ten files.** Apply the replacement table, then the adaptations below.
 - [ ] **Step 3: ADAPT `staging-smoke.sh`:** only `healthz` ships: `/healthz` must answer JSON with a `"version"` field, and `staging-smoke.sh healthz <url> [version]` asserts an exact match when a version is passed. DROP the `robots` and `login` cases and their tests — robots belongs to the landing and login to the Access login (B track + 06); both checks return when that surface exists.
@@ -708,15 +701,19 @@ gh pr merge --squash --auto
   - DROP both `staging-analytics-token.sh` steps and the smoke job's `ANALYTICS_TOKEN put outcome` step.
   - DROP the `smoke` job's `robots` and `login` steps (Task F4b).
   - Single-env config (02-backend.md): no `--env staging` anywhere. The deploy step becomes:
+
     ```bash
     pnpm --filter @ob/server exec wrangler deploy -c wrangler.jsonc \
       --var "APP_HOST:$host" --var "VERSION:$version"
     ```
+
     where `host` is `staging.open-bus.ai` (no scheme, per 02-backend's `APP_HOST`) and `version` is `$(node -p 'require("./package.json").version')-$(git rev-parse --short HEAD)`. Backend's `wrangler.jsonc` comment says `APP_HOST` and `VERSION` are written by deploy-staging; `--var` overrides them at deploy time (if the pinned wrangler lacks `--var`, write them into the config with a scoped `node` edit before deploying — Backend sanctioned that path in the same comment).
   - The smoke job checks the pinned custom domain; there is no workers.dev lookup:
+
     ```bash
     bash scripts/ci/staging-smoke.sh healthz "https://staging.open-bus.ai" "$version"
     ```
+
     The Worker name `open-bus-staging` and the `staging.open-bus.ai` custom-domain route live in Backend's `apps/server/wrangler.jsonc`. The CF token needs Zone "Workers Routes: Edit" and "DNS: Edit" on `open-bus.ai` for the deploy to attach the domain (issue #4).
 - [ ] **Step 4: ADAPT `ci.yml`:** keep all five jobs (`lint`, `typecheck`, `test`, `build`, `e2e`), the `merge_group` trigger, the pinned actionlint with its sha256, the version-consistency step, the release-only fast path (each job copies `scripts/ci/release-only.ts` from the **base** commit and skips heavy steps only when it prints exactly `release-only`), and `release-dry-run`. The `test` job's CPU step becomes `pnpm --filter @ob/server test:cpu`. The `e2e` job's artifact paths stay (`apps/dashboard/playwright-report`, `apps/dashboard/test-results`), and the job is **gated on `scripts/ci/e2e.sh` existing** (same `gate` pattern) so F4c and F3a can land in either order.
 - [ ] **Step 5: ADAPT `release-please.yml`:** four jobs —
@@ -822,7 +819,6 @@ gh api -X PUT repos/open-artifacts-ai/open-bus/actions/permissions/workflows \
 ```
 
 Note: the five contexts are the job names from `ci.yml`. `bypass_actors: []` holds admins to the same rules (00-overview §Delivery). If the ruleset API rejects `merge_queue`, enable "Require merge queue" in Settings → Branches → `main` and paste the resulting state into `docs/ops/staging.md` §Repo settings — the check names stay the same. The Actions setting "Allow GitHub Actions to create and approve pull requests" must be ON (release-please opens PRs); it is under Settings → Actions → General and is set with `gh api -X PUT repos/open-artifacts-ai/open-bus/actions/permissions/workflow-run-requests -f can_approve_pull_request_reviews=true` or by hand.
-
 - [ ] **Step 5: Verify** `gh api repos/open-artifacts-ai/open-bus/rulesets` lists the rule set; open a throwaway PR touching one workflow line and confirm the five checks and the queue behave. Then merge F4d.
 
 ---

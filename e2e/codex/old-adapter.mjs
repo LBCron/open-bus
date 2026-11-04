@@ -1,7 +1,9 @@
 // Test-only (C27k): `node --import` this before the CLI bundle to run
-// `open-bus mcp codex` as an adapter from before C27a, which sent no item id.
-// Each request's `_meta.itemId` is dropped before the adapter reads stdin; it
-// runs in the adapter's own process, so the adapter stays Codex's child.
+// `open-bus mcp codex` as an adapter from before C27a (0.61.0), which sent no
+// item id: each request's `_meta.itemId` is dropped before the adapter reads
+// stdin, and its hello says 0.61.0. It runs in the adapter's own process, so
+// the adapter stays Codex's child.
+import { Socket } from "node:net";
 import { createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
 
@@ -21,3 +23,12 @@ createInterface({ input: real })
   })
   .on("close", () => fed.end());
 Object.defineProperty(process, "stdin", { value: fed, configurable: true });
+
+const write = Socket.prototype.write;
+Socket.prototype.write = function (chunk, ...rest) {
+  const out =
+    typeof chunk === "string" && chunk.includes('"type":"hello"')
+      ? chunk.replace(/"client_version":"[^"]*"/, '"client_version":"0.61.0"')
+      : chunk;
+  return write.call(this, out, ...rest);
+};

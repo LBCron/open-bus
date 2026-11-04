@@ -360,27 +360,23 @@ describe("install: Codex restart hint (C27k)", () => {
     return out.slice(at + 1, at + 3);
   };
 
-  it("tells the user to restart Codex after the daemon is upgraded", async () => {
-    const ctx = withDaemon(["0.60.0", "0.61.1"]);
-    expect(await run(ctx)).toBe(0);
-    expect(belowDaemon(ctx)).toEqual(HINT);
-  });
-
-  it("and after a first install, when no daemon ran before", async () => {
-    const ctx = withDaemon([undefined, "0.61.1"]);
-    expect(await run(ctx)).toBe(0);
-    expect(belowDaemon(ctx)).toEqual(HINT);
-  });
-
-  it("not when the same version was already running, or Codex is not configured", async () => {
-    for (const ctx of [
-      withDaemon(["0.61.1"]),
-      withDaemon(["0.60.0", "0.61.1"], false),
+  it("tells the user to restart Codex after an install or upgrade", async () => {
+    for (const versions of [
+      ["0.60.0", "0.61.1"],
+      [undefined, "0.61.1"],
+      ["0.61.1"],
     ]) {
+      const ctx = withDaemon(versions);
       expect(await run(ctx)).toBe(0);
-      expect(belowDaemon(ctx)).toEqual(["", expect.any(String)]);
-      expect(ctx.out().join("\n")).not.toContain("Restart the Codex app");
+      expect(belowDaemon(ctx)).toEqual(HINT);
     }
+  });
+
+  it("not when Codex is not configured", async () => {
+    const ctx = withDaemon(["0.61.1"], false);
+    expect(await run(ctx)).toBe(0);
+    expect(belowDaemon(ctx)).toEqual(["", expect.any(String)]);
+    expect(ctx.out().join("\n")).not.toContain("Restart the Codex app");
   });
 });
 

@@ -239,11 +239,6 @@ async function daemonStep(
     say(ctx, roster(ctx, st), "", c.statusHint());
     return true;
   }
-  // The version running before, if any: an open Codex thread keeps its
-  // adapter across an upgrade (C27k).
-  const before = seen.codex
-    ? await askDaemon(ctx, { timeoutMs: 1000 }).catch(() => undefined)
-    : undefined;
   const { running } = await ctx.service.ensure();
   if (running !== undefined) {
     sayErr(ctx, c.daemonInTheWay(shownSocket(ctx), running));
@@ -256,7 +251,8 @@ async function daemonStep(
     return false;
   }
   say(ctx, c.daemonRunning(st.pid, ctx.service.kind, ctx.service.fallback));
-  if (seen.codex && before?.version !== st.version) say(ctx, c.codexRestart());
+  // An open Codex thread keeps its old adapter, or none (C27k).
+  if (seen.codex) say(ctx, c.codexRestart());
   say(ctx, "", roster(ctx, st), "", c.statusHint());
   return true;
 }

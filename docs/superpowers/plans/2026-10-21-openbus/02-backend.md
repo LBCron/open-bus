@@ -97,11 +97,14 @@ cp ~/code/projects/openartifacts/apps/server/src/auth/keys.ts   apps/server/src/
 `apps/server/src/auth/keys.ts`: replace `KEY_LABELS` with:
 
 ```ts
-export const KEY_LABELS = ["ob:session", "ob:oidc-state", "ob:approve"] as const;
+export const KEY_LABELS = [
+  "ob:session",
+  "ob:oidc-state",
+  "ob:approve",
+] as const;
 ```
 
 and `const HKDF_SALT = "open-bus/hkdf/v1";`.
-
 - [ ] **Step 3: Write `env.ts`**
 
 ```ts
@@ -154,17 +157,26 @@ describe("session", () => {
     expect(await readSession(e, c.slice(0, -2) + "AA")).toBeNull();
     expect(await readSession(e, c.split(".")[0])).toBeNull();
     expect(await readSession(e, undefined)).toBeNull();
-    expect(await readSession(e, await signSession(e, OWNER_UID, Date.now() - 8 * 86400_000))).toBeNull();
+    expect(
+      await readSession(
+        e,
+        await signSession(e, OWNER_UID, Date.now() - 8 * 86400_000),
+      ),
+    ).toBeNull();
   });
   it("uses the __Host- name outside dev", () => {
-    expect(sessionCookieName({ ENVIRONMENT: "production" })).toBe("__Host-ob_session");
+    expect(sessionCookieName({ ENVIRONMENT: "production" })).toBe(
+      "__Host-ob_session",
+    );
     expect(sessionCookieName({ ENVIRONMENT: "dev" })).toBe("ob_session");
   });
 });
 
 describe("oidc", () => {
   it("builds a PKCE authorize redirect with a per-attempt state cookie", async () => {
-    const r = await buildAuthorizeRedirect(e, "/machines", { cookieHeader: null });
+    const r = await buildAuthorizeRedirect(e, "/machines", {
+      cookieHeader: null,
+    });
     const u = new URL(r.location);
     expect(u.searchParams.get("code_challenge_method")).toBe("S256");
     expect(u.searchParams.get("nonce")).toBeTruthy();
@@ -172,9 +184,15 @@ describe("oidc", () => {
   });
   it("keeps next same-origin only", () => {
     const base = "https://bus.example.com";
-    expect(safeNext({ ...e, ENVIRONMENT: "dev" } as never, "/machines")).toBe("/machines");
-    expect(safeNext({ ...e, ENVIRONMENT: "dev" } as never, "//evil.com")).toBe("/");
-    expect(safeNext({ ...e, ENVIRONMENT: "dev" } as never, "https://evil.com/x")).toBe("/");
+    expect(safeNext({ ...e, ENVIRONMENT: "dev" } as never, "/machines")).toBe(
+      "/machines",
+    );
+    expect(safeNext({ ...e, ENVIRONMENT: "dev" } as never, "//evil.com")).toBe(
+      "/",
+    );
+    expect(
+      safeNext({ ...e, ENVIRONMENT: "dev" } as never, "https://evil.com/x"),
+    ).toBe("/");
   });
 });
 ```
@@ -183,12 +201,16 @@ describe("oidc", () => {
 
 Run: `pnpm --filter @ob/server test -- test/auth.test.ts`
 Expected: FAIL — `../src/auth/session.js` has no `OWNER_UID`.
-
 - [ ] **Step 6: Write `session.ts`**
 
 ```ts
 import type { Env } from "../env.js";
-import { b64urlDecode, b64urlEncode, hmacSign, hmacVerify } from "../util/crypto.js";
+import {
+  b64urlDecode,
+  b64urlEncode,
+  hmacSign,
+  hmacVerify,
+} from "../util/crypto.js";
 import { utf8Decoder, utf8Encoder } from "../util/text.js";
 
 /** OpenBus is single-owner: the session names the owner, never a user row. */
@@ -227,7 +249,8 @@ export async function readSession(
     if (!raw) return null;
     const s = JSON.parse(utf8Decoder.decode(raw)) as Partial<Session> | null;
     if (!s || typeof s.uid !== "string" || !UID_RE.test(s.uid)) return null;
-    if (typeof s.exp !== "number" || !Number.isFinite(s.exp) || s.exp <= now) return null;
+    if (typeof s.exp !== "number" || !Number.isFinite(s.exp) || s.exp <= now)
+      return null;
     return { uid: s.uid, exp: s.exp };
   } catch {
     return null;
@@ -247,7 +270,10 @@ const attrs = (env: Pick<Env, "ENVIRONMENT">) =>
     ? "HttpOnly; SameSite=Lax; Path=/"
     : "HttpOnly; Secure; SameSite=Lax; Path=/";
 
-export function sessionCookie(value: string, env: Pick<Env, "ENVIRONMENT">): string {
+export function sessionCookie(
+  value: string,
+  env: Pick<Env, "ENVIRONMENT">,
+): string {
   return `${sessionCookieName(env)}=${value}; ${attrs(env)}; Max-Age=${MAX_AGE_S}`;
 }
 
@@ -260,7 +286,6 @@ export function clearSessionCookie(env: Pick<Env, "ENVIRONMENT">): string {
 
 Run: `pnpm --filter @ob/server test -- test/auth.test.ts`
 Expected: PASS (5 tests).
-
 - [ ] **Step 8: Commit**
 
 ```bash
@@ -291,7 +316,10 @@ const cookieOf = (res: Response): string =>
 
 describe("sign-in", () => {
   it("/auth/login redirects to Access with PKCE and sets a state cookie", async () => {
-    const r = await SELF.fetch("https://app.localhost/auth/login?next=/machines", { redirect: "manual" });
+    const r = await SELF.fetch(
+      "https://app.localhost/auth/login?next=/machines",
+      { redirect: "manual" },
+    );
     expect(r.status).toBe(302);
     expect(r.headers.get("location")).toContain("code_challenge_method=S256");
     const set = r.headers.get("set-cookie") ?? "";
@@ -300,27 +328,42 @@ describe("sign-in", () => {
   });
 
   it("/auth/login never sends next off-site", async () => {
-    const r = await SELF.fetch("https://app.localhost/auth/login?next=https://evil.test", { redirect: "manual" });
+    const r = await SELF.fetch(
+      "https://app.localhost/auth/login?next=https://evil.test",
+      { redirect: "manual" },
+    );
     expect(r.headers.get("location") ?? "").not.toContain("evil.test");
   });
 
   it("/auth/callback without a state cookie redirects to retry once", async () => {
-    const r = await SELF.fetch("https://app.localhost/auth/callback?state=abc&code=x", { redirect: "manual" });
+    const r = await SELF.fetch(
+      "https://app.localhost/auth/callback?state=abc&code=x",
+      { redirect: "manual" },
+    );
     expect(r.status).toBe(302);
-    expect(r.headers.get("location")).toBe(`/auth/login?next=${encodeURIComponent("/")}&retry=1`);
+    expect(r.headers.get("location")).toBe(
+      `/auth/login?next=${encodeURIComponent("/")}&retry=1`,
+    );
   });
 
   it("/auth/dev-login signs the owner in only in dev", async () => {
-    const r = await SELF.fetch("https://app.localhost/auth/dev-login?next=/machines", { redirect: "manual" });
+    const r = await SELF.fetch(
+      "https://app.localhost/auth/dev-login?next=/machines",
+      { redirect: "manual" },
+    );
     expect(r.status).toBe(302);
     expect(r.headers.get("location")).toBe("/machines");
     const c = cookieOf(r);
     expect(c.startsWith(`${sessionCookieName(e)}=`)).toBe(true);
-    expect((await readSession(e, c.slice(c.indexOf("=") + 1)))?.uid).toBe("owner");
+    expect((await readSession(e, c.slice(c.indexOf("=") + 1)))?.uid).toBe(
+      "owner",
+    );
   });
 
   it("/auth/logout clears the session", async () => {
-    const login = await SELF.fetch("https://app.localhost/auth/dev-login", { redirect: "manual" });
+    const login = await SELF.fetch("https://app.localhost/auth/dev-login", {
+      redirect: "manual",
+    });
     const c = cookieOf(login);
     const r = await SELF.fetch("https://app.localhost/auth/logout", {
       method: "POST",
@@ -337,7 +380,6 @@ describe("sign-in", () => {
 
 Run: `pnpm --filter @ob/server test -- test/signin.test.ts`
 Expected: FAIL — 404 on `/auth/login`.
-
 - [ ] **Step 3: Write `routes/auth.ts`**
 
 ```ts
@@ -350,7 +392,11 @@ import {
   pickStateCookie,
   safeNext,
 } from "../auth/oidc.js";
-import { clearSessionCookie, sessionCookie, signSession } from "../auth/session.js";
+import {
+  clearSessionCookie,
+  sessionCookie,
+  signSession,
+} from "../auth/session.js";
 import { ApiError } from "../http/errors.js";
 import type { AppType } from "./types.js";
 
@@ -361,55 +407,84 @@ const redirect = (location: string, cookies: string[] = []) => {
 };
 
 const html = (body: string, status = 200) =>
-  new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>OpenBus</title></head><body>${body}</body></html>`, {
-    status,
-    headers: {
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": "no-store",
-      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  new Response(
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>OpenBus</title></head><body>${body}</body></html>`,
+    {
+      status,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+        "content-security-policy":
+          "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+      },
     },
-  });
+  );
 
-const sameOwner = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+const sameOwner = (a: string, b: string) =>
+  a.trim().toLowerCase() === b.trim().toLowerCase();
 
 export function mountAuth(app: AppType): void {
   app.get(AUTH.login, async (c) => {
     const { location, stateCookie, evict } = await buildAuthorizeRedirect(
       c.env,
       c.req.query("next") ?? "/",
-      { retry: c.req.query("retry") === "1", cookieHeader: c.req.header("cookie") },
+      {
+        retry: c.req.query("retry") === "1",
+        cookieHeader: c.req.header("cookie"),
+      },
     );
     return redirect(location, [...evict, stateCookie]);
   });
 
   app.get(AUTH.callback, async (c) => {
     // This attempt's state cookie is single-use: cleared on success and on every failure.
-    const picked = await pickStateCookie(c.env, c.req.raw, c.req.query("state") ?? "");
+    const picked = await pickStateCookie(
+      c.env,
+      c.req.raw,
+      c.req.query("state") ?? "",
+    );
     const clear = picked ? [clearOidcCookie(c.env, picked.name)] : [];
     try {
       const { email, next } = await handleCallback(c.env, c.req.raw);
-      if (!sameOwner(email, c.env.OWNER_EMAIL)) return redirect("/auth/no-access", clear);
-      return redirect(next, [...clear, sessionCookie(await signSession(c.env), c.env)]);
+      if (!sameOwner(email, c.env.OWNER_EMAIL))
+        return redirect("/auth/no-access", clear);
+      return redirect(next, [
+        ...clear,
+        sessionCookie(await signSession(c.env), c.env),
+      ]);
     } catch (e) {
       if (!(e instanceof OidcStateError)) throw e;
-      if (e.retry) return html("<h1>Sign-in interrupted</h1><p>Try again.</p>", 400);
-      return redirect(`${AUTH.login}?next=${encodeURIComponent(e.next)}&retry=1`, clear);
+      if (e.retry)
+        return html("<h1>Sign-in interrupted</h1><p>Try again.</p>", 400);
+      return redirect(
+        `${AUTH.login}?next=${encodeURIComponent(e.next)}&retry=1`,
+        clear,
+      );
     }
   });
 
   app.get("/auth/no-access", () =>
-    html("<h1>Not your bus</h1><p>This instance belongs to another owner.</p>", 403),
+    html(
+      "<h1>Not your bus</h1><p>This instance belongs to another owner.</p>",
+      403,
+    ),
   );
 
-  app.post(AUTH.logout, () =>
-    new Response(null, {
-      status: 204,
-      headers: { "set-cookie": clearSessionCookie({ ENVIRONMENT: "production" }), "cache-control": "no-store" },
-    }),
+  app.post(
+    AUTH.logout,
+    () =>
+      new Response(null, {
+        status: 204,
+        headers: {
+          "set-cookie": clearSessionCookie({ ENVIRONMENT: "production" }),
+          "cache-control": "no-store",
+        },
+      }),
   );
 
   app.get(AUTH.devLogin, async (c) => {
-    if (c.env.ENVIRONMENT !== "dev") throw new ApiError("not_found", "Not found");
+    if (c.env.ENVIRONMENT !== "dev")
+      throw new ApiError("not_found", "Not found");
     return redirect(safeNext(c.env, c.req.query("next")), [
       sessionCookie(await signSession(c.env), c.env),
     ]);
@@ -417,15 +492,20 @@ export function mountAuth(app: AppType): void {
 }
 ```
 
-One correction to the logout above: it must clear the cookie with the *same* name the browser holds, so pass the real env: `clearSessionCookie(c.env)` and take `c` as the handler argument. Write it as:
+One correction to the logout above: it must clear the cookie with the _same_ name the browser holds, so pass the real env: `clearSessionCookie(c.env)` and take `c` as the handler argument. Write it as:
 
 ```ts
-  app.post(AUTH.logout, (c) =>
+app.post(
+  AUTH.logout,
+  (c) =>
     new Response(null, {
       status: 204,
-      headers: { "set-cookie": clearSessionCookie(c.env), "cache-control": "no-store" },
+      headers: {
+        "set-cookie": clearSessionCookie(c.env),
+        "cache-control": "no-store",
+      },
     }),
-  );
+);
 ```
 
 - [ ] **Step 4: Mount it**
@@ -445,7 +525,6 @@ export function mountRoutes(app: AppType): void {
 
 Run: `pnpm --filter @ob/server test -- test/signin.test.ts`
 Expected: PASS (5 tests). `ENVIRONMENT` is fixed to `dev` by the test config; the production branch of dev-login is one line and is covered by review.
-
 - [ ] **Step 6: Commit**
 
 ```bash
@@ -470,7 +549,6 @@ cp ~/code/projects/openartifacts/apps/server/src/http/body.ts    apps/server/src
 ```
 
 In `http/errors.ts` keep `ApiError`, `errorJson`, `toErrorResponse`, `appOrigin`; delete every reference to D1, plans and `@oa/shared` codes (map to `@ob/shared`'s `ERROR_CODES`, `STATUS_FOR`).
-
 - [ ] **Step 2: Write the failing app test**
 
 `apps/server/test/app.test.ts`:
@@ -479,7 +557,8 @@ In `http/errors.ts` keep `ApiError`, `errorJson`, `toErrorResponse`, `appOrigin`
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
-const get = (p: string, init?: RequestInit) => SELF.fetch(`https://app.localhost${p}`, init);
+const get = (p: string, init?: RequestInit) =>
+  SELF.fetch(`https://app.localhost${p}`, init);
 
 describe("app shell", () => {
   it("serves /healthz with a version", async () => {
@@ -490,7 +569,9 @@ describe("app shell", () => {
   });
   it("404s an unlisted route before any handler runs", async () => {
     expect((await get("/api/v1/nope")).status).toBe(404);
-    expect((await get("/approve/AAAA-AAAA", { method: "PUT" })).status).toBe(404);
+    expect((await get("/approve/AAAA-AAAA", { method: "PUT" })).status).toBe(
+      404,
+    );
   });
   it("401s a session route without a cookie", async () => {
     const r = await get("/api/v1/me");
@@ -499,7 +580,10 @@ describe("app shell", () => {
   });
   it("requires X-OB-Request on cookie mutations", async () => {
     const { cookie } = await loginForTest();
-    const r = await get("/api/v1/machines/x", { method: "DELETE", headers: { cookie } });
+    const r = await get("/api/v1/machines/x", {
+      method: "DELETE",
+      headers: { cookie },
+    });
     expect(r.status).toBe(403);
     expect((await r.json()).error.code).toBe("csrf");
   });
@@ -514,7 +598,9 @@ describe("app shell", () => {
 });
 
 async function loginForTest() {
-  const { signSession, sessionCookie, sessionCookieName } = await import("../src/auth/session.js");
+  const { signSession, sessionCookie, sessionCookieName } = await import(
+    "../src/auth/session.js"
+  );
   const { env } = await import("cloudflare:workers");
   const e = env as unknown as import("../src/env.js").Env;
   return { cookie: `${sessionCookieName(e)}=${await signSession(e)}` };
@@ -525,7 +611,6 @@ async function loginForTest() {
 
 Run: `pnpm --filter @ob/server test -- test/app.test.ts`
 Expected: FAIL — no `src/app.ts`.
-
 - [ ] **Step 4: Write the policy gate**
 
 `apps/server/src/auth/route-policy.ts`:
@@ -543,7 +628,10 @@ import { readSession, sessionCookieName } from "./session.js";
  * route cannot ship unguarded. `machine` routes verify the bearer token in
  * their handler (the gate only proves the table lists them).
  */
-export type Policy = { public: string } | { session: string } | { machine: string };
+export type Policy =
+  | { public: string }
+  | { session: string }
+  | { machine: string };
 
 export const ROUTE_POLICY: Readonly<Record<string, Policy>> = {
   "GET /healthz": { public: "health probe" },
@@ -567,16 +655,22 @@ export const ROUTE_POLICY: Readonly<Record<string, Policy>> = {
 };
 
 /** The matched route pattern Hono registered, e.g. "/api/v1/machines/:id". */
-const routeKey = (c: Context<AppEnv>): string => `${c.req.method} ${c.req.routePath}`;
+const routeKey = (c: Context<AppEnv>): string =>
+  `${c.req.method} ${c.req.routePath}`;
 
 export const enforcePolicy =
-  (table: Readonly<Record<string, Policy>> = ROUTE_POLICY): MiddlewareHandler<AppEnv> =>
+  (
+    table: Readonly<Record<string, Policy>> = ROUTE_POLICY,
+  ): MiddlewareHandler<AppEnv> =>
   async (c, next) => {
     const rule = table[routeKey(c)] ?? table[`ALL ${c.req.routePath}`];
     if (!rule) throw new ApiError("not_found", "Not found");
     if ("public" in rule) return next();
     if ("machine" in rule) return next();
-    const session = await readSession(c.env, getCookie(c, sessionCookieName(c.env)));
+    const session = await readSession(
+      c.env,
+      getCookie(c, sessionCookieName(c.env)),
+    );
     if (!session) throw new ApiError("unauthorized", "Sign in to continue");
     c.set("session", session);
     return next();
@@ -616,13 +710,16 @@ export function withSecurityHeaders(res: Response): Response {
   }
 }
 
-export const securityHeaders = (): MiddlewareHandler<AppEnv> => async (c, next) => {
-  await next();
-  c.res = withSecurityHeaders(c.res);
-};
+export const securityHeaders =
+  (): MiddlewareHandler<AppEnv> => async (c, next) => {
+    await next();
+    c.res = withSecurityHeaders(c.res);
+  };
 
 /** Idempotent: the gate may already have read the session. */
-export async function resolveSession(c: Context<AppEnv>): Promise<Session | null> {
+export async function resolveSession(
+  c: Context<AppEnv>,
+): Promise<Session | null> {
   const known = c.get("session");
   if (known !== undefined) return known;
   const s = await readSession(c.env, getCookie(c, sessionCookieName(c.env)));
@@ -645,7 +742,9 @@ export const csrf = (): MiddlewareHandler<AppEnv> => async (c, next) => {
   if (m !== "GET" && m !== "HEAD") {
     const hasCookie = getCookie(c, sessionCookieName(c.env)) !== undefined;
     if (hasCookie && c.req.header(CSRF_HEADER) !== "1")
-      return toErrorResponse(new ApiError("csrf", `Missing ${CSRF_HEADER}: 1 header`));
+      return toErrorResponse(
+        new ApiError("csrf", `Missing ${CSRF_HEADER}: 1 header`),
+      );
   }
   await next();
 };
@@ -654,7 +753,10 @@ export const csrf = (): MiddlewareHandler<AppEnv> => async (c, next) => {
 export const sameOrigin = (): MiddlewareHandler<AppEnv> => async (c, next) => {
   const site = c.req.header("sec-fetch-site");
   const origin = c.req.header("origin");
-  if (site === "cross-site" || (origin !== undefined && origin !== appOrigin(c.env)))
+  if (
+    site === "cross-site" ||
+    (origin !== undefined && origin !== appOrigin(c.env))
+  )
     return toErrorResponse(new ApiError("csrf", "Cross-site request"));
   await next();
 };
@@ -666,7 +768,8 @@ export const sameOrigin = (): MiddlewareHandler<AppEnv> => async (c, next) => {
 
 ```ts
 import type { Env } from "./env.js";
-export const version = (env: Pick<Env, "VERSION">): string => env.VERSION?.trim() || "dev";
+export const version = (env: Pick<Env, "VERSION">): string =>
+  env.VERSION?.trim() || "dev";
 ```
 
 `apps/server/src/app.ts`:
@@ -743,10 +846,15 @@ import type { Env } from "./env.js";
 export type { Env } from "./env.js";
 export { Hub } from "./hub/do.js";
 
-const normHost = (h: string) => h.toLowerCase().replace(/:\d+$/, "").replace(/\.$/, "");
+const normHost = (h: string) =>
+  h.toLowerCase().replace(/:\d+$/, "").replace(/\.$/, "");
 
 export default {
-  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(
+    req: Request,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const url = new URL(req.url);
     // workers.dev and custom-domain hosts both serve the app; only the exact
     // configured host list is honoured in production once F4 sets it.
@@ -757,7 +865,6 @@ export default {
 ```
 
 Create an empty `apps/server/src/hub/do.ts` exporting `class Hub {}` for now; B3 replaces it.
-
 - [ ] **Step 7: Write the Cloudflare test config**
 
 `apps/server/wrangler.test.jsonc`:
@@ -789,7 +896,9 @@ import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  plugins: [cloudflareTest({ wrangler: { configPath: "./wrangler.test.jsonc" } })],
+  plugins: [
+    cloudflareTest({ wrangler: { configPath: "./wrangler.test.jsonc" } }),
+  ],
   test: { include: ["test/**/*.test.ts"] },
 });
 ```
@@ -798,7 +907,6 @@ export default defineConfig({
 
 Run: `pnpm --filter @ob/server test -- test/app.test.ts`
 Expected: PASS (5 tests). `/api/v1/me` is listed in the policy table and returns 401 from the gate; its handler lands in B10.
-
 - [ ] **Step 9: Commit**
 
 ```bash
@@ -831,15 +939,24 @@ describe("hub machines", () => {
     expect(m.token).toMatch(/^ob_machine_[1-9A-HJ-NP-Za-km-z]{32}$/);
     expect(m.id).toHaveLength(16);
     const { sha256Hex } = await import("../src/util/crypto.js");
-    expect(await h.verifyToken(await sha256Hex(m.token))).toEqual({ id: m.id, label: "MacBook" });
-    expect(await h.verifyToken(await sha256Hex("ob_machine_" + "a".repeat(32)))).toBeNull();
+    expect(await h.verifyToken(await sha256Hex(m.token))).toEqual({
+      id: m.id,
+      label: "MacBook",
+    });
+    expect(
+      await h.verifyToken(await sha256Hex("ob_machine_" + "a".repeat(32))),
+    ).toBeNull();
   });
   it("lists machines with liveness and never the hash", async () => {
     const h = hub(e);
     const m = await h.createMachine("Studio");
     const rows = await h.listMachines();
     const row = rows.find((r) => r.id === m.id);
-    expect(row).toMatchObject({ label: "Studio", revokedAt: null, lastUsedAt: null });
+    expect(row).toMatchObject({
+      label: "Studio",
+      revokedAt: null,
+      lastUsedAt: null,
+    });
     expect(JSON.stringify(rows)).not.toContain("tokenHash");
   });
   it("stamps org_id on every row", async () => {
@@ -855,7 +972,6 @@ describe("hub machines", () => {
 
 Run: `pnpm --filter @ob/server test -- test/hub.machines.test.ts`
 Expected: FAIL — `hub` is not exported / `createMachine` missing.
-
 - [ ] **Step 3: Write the schema**
 
 `apps/server/src/hub/schema.ts`:
@@ -1050,7 +1166,10 @@ export class Hub extends DurableObject<Env> {
   // ---------------------------------------------------------------- machines
 
   /** Called by the device flow once a user code is approved. Returns the token once. */
-  async createMachine(label: string, id: string = newId()): Promise<{ id: string; label: string; token: string }> {
+  async createMachine(
+    label: string,
+    id: string = newId(),
+  ): Promise<{ id: string; label: string; token: string }> {
     this.init();
     const token = newMachineToken();
     const { sha256Hex } = await import("../util/crypto.js");
@@ -1066,15 +1185,26 @@ export class Hub extends DurableObject<Env> {
   }
 
   /** One lookup per WebSocket upgrade; last_used is throttled to once an hour. */
-  async verifyToken(tokenHash: string): Promise<{ id: string; label: string } | null> {
-    const row = this.one<{ id: string; label: string; revokedAt: number | null; lastUsedAt: number | null }>(
+  async verifyToken(
+    tokenHash: string,
+  ): Promise<{ id: string; label: string } | null> {
+    const row = this.one<{
+      id: string;
+      label: string;
+      revokedAt: number | null;
+      lastUsedAt: number | null;
+    }>(
       `select id, label, revoked_at as revokedAt, last_used as lastUsedAt from machines where token_hash = ? limit 1`,
       tokenHash,
     );
     if (!row || row.revokedAt !== null) return null;
     const now = this.now();
     if (row.lastUsedAt === null || row.lastUsedAt < now - 3_600_000)
-      this.ctx.storage.sql.exec("update machines set last_used = ? where id = ?", now, row.id);
+      this.ctx.storage.sql.exec(
+        "update machines set last_used = ? where id = ?",
+        now,
+        row.id,
+      );
     return { id: row.id, label: row.label };
   }
 
@@ -1123,7 +1253,6 @@ export function hub(env: Pick<Env, "HUB">): HubStub {
 
 Run: `pnpm --filter @ob/server test -- test/hub.machines.test.ts`
 Expected: PASS (3 tests).
-
 - [ ] **Step 8: Commit**
 
 ```bash
@@ -1147,7 +1276,11 @@ git commit -m "feat(hub): SQLite schema, machine rows and token verification"
 ```ts
 import { SELF, env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { sessionCookie, sessionCookieName, signSession } from "../src/auth/session.js";
+import {
+  sessionCookie,
+  sessionCookieName,
+  signSession,
+} from "../src/auth/session.js";
 
 const e = env as unknown as import("../src/env.js").Env;
 const post = (p: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -1167,25 +1300,44 @@ describe("device flow", () => {
     expect(code.expires_in).toBe(600);
     expect(code.interval).toBe(5);
 
-    expect(await (await post("/device/token", { device_code: code.device_code })).json())
-      .toEqual({ status: "pending" });
+    expect(
+      await (
+        await post("/device/token", { device_code: code.device_code })
+      ).json(),
+    ).toEqual({ status: "pending" });
 
     const c = await cookie();
-    const page = await SELF.fetch(`https://app.localhost/approve/${code.user_code}`, { headers: { cookie: c } });
+    const page = await SELF.fetch(
+      `https://app.localhost/approve/${code.user_code}`,
+      { headers: { cookie: c } },
+    );
     expect(page.status).toBe(200);
     expect(await page.text()).toContain("MacBook");
 
-    const approve = await SELF.fetch(`https://app.localhost/approve/${code.user_code}`, {
-      method: "POST",
-      headers: { cookie: c, "X-OB-Request": "1", "content-type": "application/x-www-form-urlencoded" },
-      body: "decision=approve&csrf=" + encodeURIComponent(await csrfFor(code.user_code)),
-    });
+    const approve = await SELF.fetch(
+      `https://app.localhost/approve/${code.user_code}`,
+      {
+        method: "POST",
+        headers: {
+          cookie: c,
+          "X-OB-Request": "1",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body:
+          "decision=approve&csrf=" +
+          encodeURIComponent(await csrfFor(code.user_code)),
+      },
+    );
     expect(approve.status).toBe(303);
 
-    const granted = await (await post("/device/token", { device_code: code.device_code })).json();
+    const granted = await (
+      await post("/device/token", { device_code: code.device_code })
+    ).json();
     expect(granted.status).toBe("approved");
     expect(granted.token).toMatch(/^ob_machine_/);
-    const again = await (await post("/device/token", { device_code: code.device_code })).json();
+    const again = await (
+      await post("/device/token", { device_code: code.device_code })
+    ).json();
     expect(again).toEqual({ status: "expired" });
   });
 
@@ -1194,28 +1346,49 @@ describe("device flow", () => {
     const c = await cookie();
     await SELF.fetch(`https://app.localhost/approve/${code.user_code}`, {
       method: "POST",
-      headers: { cookie: c, "X-OB-Request": "1", "content-type": "application/x-www-form-urlencoded" },
-      body: "decision=deny&csrf=" + encodeURIComponent(await csrfFor(code.user_code)),
+      headers: {
+        cookie: c,
+        "X-OB-Request": "1",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body:
+        "decision=deny&csrf=" +
+        encodeURIComponent(await csrfFor(code.user_code)),
     });
-    expect(await (await post("/device/token", { device_code: code.device_code })).json())
-      .toEqual({ status: "denied" });
+    expect(
+      await (
+        await post("/device/token", { device_code: code.device_code })
+      ).json(),
+    ).toEqual({ status: "denied" });
   });
 
   it("sends a signed-out browser to login with next", async () => {
     const code = await (await post("/device/code", {})).json();
-    const r = await SELF.fetch(`https://app.localhost/approve/${code.user_code}`, { redirect: "manual" });
+    const r = await SELF.fetch(
+      `https://app.localhost/approve/${code.user_code}`,
+      { redirect: "manual" },
+    );
     expect(r.status).toBe(302);
-    expect(r.headers.get("location")).toBe(`/auth/login?next=${encodeURIComponent(`/approve/${code.user_code}`)}`);
+    expect(r.headers.get("location")).toBe(
+      `/auth/login?next=${encodeURIComponent(`/approve/${code.user_code}`)}`,
+    );
   });
 
   it("rejects a forged CSRF token", async () => {
     const code = await (await post("/device/code", {})).json();
     const c = await cookie();
-    const r = await SELF.fetch(`https://app.localhost/approve/${code.user_code}`, {
-      method: "POST",
-      headers: { cookie: c, "X-OB-Request": "1", "content-type": "application/x-www-form-urlencoded" },
-      body: "decision=approve&csrf=1.2",
-    });
+    const r = await SELF.fetch(
+      `https://app.localhost/approve/${code.user_code}`,
+      {
+        method: "POST",
+        headers: {
+          cookie: c,
+          "X-OB-Request": "1",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: "decision=approve&csrf=1.2",
+      },
+    );
     expect(r.status).toBe(403);
   });
 });
@@ -1235,9 +1408,18 @@ import { sessionCookieName, signSession } from "../src/auth/session.js";
 
 it("renders the approval page under 8 KB", async () => {
   const e = env as unknown as import("../src/env.js").Env;
-  const code = await (await SELF.fetch("https://app.localhost/device/code", { method: "POST", body: "{}" })).json();
+  const code = await (
+    await SELF.fetch("https://app.localhost/device/code", {
+      method: "POST",
+      body: "{}",
+    })
+  ).json();
   const cookie = `${sessionCookieName(e)}=${await signSession(e)}`;
-  const html = await (await SELF.fetch(`https://app.localhost/approve/${code.user_code}`, { headers: { cookie } })).text();
+  const html = await (
+    await SELF.fetch(`https://app.localhost/approve/${code.user_code}`, {
+      headers: { cookie },
+    })
+  ).text();
   expect(new TextEncoder().encode(html).length).toBeLessThan(8 * 1024);
 });
 ```
@@ -1246,7 +1428,6 @@ it("renders the approval page under 8 KB", async () => {
 
 Run: `pnpm --filter @ob/server test -- test/device.test.ts`
 Expected: FAIL — 404 on `/device/code`.
-
 - [ ] **Step 3: Add the hub's device methods**
 
 Append to the `Hub` class in `hub/do.ts` (imports: `newDeviceSecret`, `newUserCode`, `formatUserCode`, `normalizeUserCode`, `LIMITS` from `@ob/shared`; `DeviceCodeRow` from `./rows.js`):
@@ -1360,7 +1541,6 @@ Append to the `Hub` class in `hub/do.ts` (imports: `newDeviceSecret`, `newUserCo
 ```
 
 `HubStub` is the class type, so these methods are visible to the Worker with no further export. `notifyMachines` lands in B10; B4's `deviceToken` calls it, so for this one task add a no-op `notifyMachines(): void {}` and B10 replaces it with the real broadcast.
-
 - [ ] **Step 4: Write the approve CSRF**
 
 `apps/server/src/auth/approve-csrf.ts`:
@@ -1372,7 +1552,8 @@ import { deriveKey } from "./keys.js";
 import { hmacSign, hmacVerify } from "../util/crypto.js";
 
 const TTL_MS = 600_000;
-const payload = (userCode: string, exp: number) => `${normalizeUserCode(userCode) ?? ""}\n${exp}`;
+const payload = (userCode: string, exp: number) =>
+  `${normalizeUserCode(userCode) ?? ""}\n${exp}`;
 
 /**
  * The approval form's token: HMAC under `ob:approve` over the normalized code
@@ -1385,12 +1566,20 @@ export async function approveCsrf(env: Env, userCode: string): Promise<string> {
   return `${exp}.${await hmacSign(await deriveKey(env, "ob:approve"), body)}`;
 }
 
-export async function checkApproveCsrf(env: Env, userCode: string, token: string): Promise<boolean> {
+export async function checkApproveCsrf(
+  env: Env,
+  userCode: string,
+  token: string,
+): Promise<boolean> {
   const m = /^(\d{13})\.([A-Za-z0-9_-]{43})$/.exec(token);
   if (!m) return false;
   const exp = Number(m[1]);
   if (!Number.isFinite(exp) || exp <= Date.now()) return false;
-  return hmacVerify(await deriveKey(env, "ob:approve"), payload(userCode, exp), m[2] as string);
+  return hmacVerify(
+    await deriveKey(env, "ob:approve"),
+    payload(userCode, exp),
+    m[2] as string,
+  );
 }
 ```
 
@@ -1426,7 +1615,10 @@ async function deviceLimit(c: Context<AppEnv>, key: string): Promise<void> {
 }
 
 const ipKey = (c: Context<AppEnv>): string => {
-  const ip = c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for") ?? "unknown";
+  const ip =
+    c.req.header("cf-connecting-ip") ??
+    c.req.header("x-forwarded-for") ??
+    "unknown";
   return ip.split(",")[0]!.trim().slice(0, 64);
 };
 
@@ -1470,7 +1662,13 @@ export function mountDevice(app: AppType): void {
 import { PRODUCT_NAME } from "@ob/shared";
 
 const esc = (s: string) =>
-  s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch] as string);
+  s.replace(
+    /[&<>"']/g,
+    (ch) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        ch
+      ] as string,
+  );
 
 export type ApproveView =
   | { kind: "pending"; userCode: string; label: string; csrf: string }
@@ -1510,7 +1708,12 @@ button.no{background:transparent;color:var(--fg);border-color:var(--line)}code{f
 `apps/server/src/routes/approve.ts`:
 
 ```ts
-import { ApprovalBodySchema, R, formatUserCode, normalizeUserCode } from "@ob/shared";
+import {
+  ApprovalBodySchema,
+  R,
+  formatUserCode,
+  normalizeUserCode,
+} from "@ob/shared";
 import { approveCsrf, checkApproveCsrf } from "../auth/approve-csrf.js";
 import { ApiError } from "../http/errors.js";
 import { resolveSession } from "../http/middleware.js";
@@ -1546,8 +1749,20 @@ export function mountApprove(app: AppType): void {
     const info = await hub(c.env).deviceCodeInfo(userCode);
     if (!info) throw new ApiError("not_found", "Not found");
     if (info.state === "pending")
-      return html(renderApprove({ kind: "pending", userCode, label: info.label, csrf: await approveCsrf(c.env, userCode) }));
-    return html(renderApprove({ kind: info.state === "expired" ? "expired" : "used", userCode }));
+      return html(
+        renderApprove({
+          kind: "pending",
+          userCode,
+          label: info.label,
+          csrf: await approveCsrf(c.env, userCode),
+        }),
+      );
+    return html(
+      renderApprove({
+        kind: info.state === "expired" ? "expired" : "used",
+        userCode,
+      }),
+    );
   });
 
   app.post("/approve/:user_code", async (c) => {
@@ -1560,16 +1775,29 @@ export function mountApprove(app: AppType): void {
       throw new ApiError("csrf", "Invalid or expired form token");
     const body = ApprovalBodySchema.parse({
       decision: form.decision,
-      label: typeof form.label === "string" && form.label.trim() ? form.label : undefined,
+      label:
+        typeof form.label === "string" && form.label.trim()
+          ? form.label
+          : undefined,
     });
-    const r = await hub(c.env).decideDeviceCode(userCode, body.decision, body.label);
+    const r = await hub(c.env).decideDeviceCode(
+      userCode,
+      body.decision,
+      body.label,
+    );
     if (!r.ok)
       return html(
-        renderApprove({ kind: r.reason === "expired" ? "expired" : "used", userCode }),
+        renderApprove({
+          kind: r.reason === "expired" ? "expired" : "used",
+          userCode,
+        }),
       );
     return new Response(null, {
       status: 303,
-      headers: { location: `${R.dashboard}?approved=${encodeURIComponent(userCode)}`, "cache-control": "no-store" },
+      headers: {
+        location: `${R.dashboard}?approved=${encodeURIComponent(userCode)}`,
+        "cache-control": "no-store",
+      },
     });
   });
 }
@@ -1596,7 +1824,6 @@ export function mountRoutes(app: AppType): void {
 
 Run: `pnpm --filter @ob/server test -- test/device.test.ts test/size.test.ts`
 Expected: PASS (5 tests).
-
 - [ ] **Step 9: Commit**
 
 ```bash
@@ -1631,7 +1858,9 @@ export async function session(): Promise<string> {
   return `${sessionCookieName(e)}=${await signSession(e)}`;
 }
 
-export async function machine(label = "MacBook"): Promise<{ id: string; token: string }> {
+export async function machine(
+  label = "MacBook",
+): Promise<{ id: string; token: string }> {
   const m = await hub(e).createMachine(label);
   return { id: m.id, token: m.token };
 }
@@ -1662,7 +1891,10 @@ export async function daemon(token: string): Promise<{
     queue.length
       ? Promise.resolve(queue.shift() as ServerFrame)
       : new Promise<ServerFrame>((resolve, reject) => {
-          const t = setTimeout(() => reject(new Error("timed out waiting for a frame")), 2000);
+          const t = setTimeout(
+            () => reject(new Error("timed out waiting for a frame")),
+            2000,
+          );
           waiting.push((f) => {
             clearTimeout(t);
             resolve(f);
@@ -1698,14 +1930,26 @@ import { describe, expect, it } from "vitest";
 import { SELF } from "cloudflare:test";
 import { daemon, machine, waitFor } from "./helpers.js";
 
-const hello = (id: string) => ({ v: 1, id, type: "hello", machine_label: "MacBook", client_version: "0.1.0" }) as const;
+const hello = (id: string) =>
+  ({
+    v: 1,
+    id,
+    type: "hello",
+    machine_label: "MacBook",
+    client_version: "0.1.0",
+  }) as const;
 
 describe("hub socket", () => {
   it("refuses /hub without a valid machine token", async () => {
-    const r = await SELF.fetch("https://app.localhost/hub", { headers: { Upgrade: "websocket" } });
+    const r = await SELF.fetch("https://app.localhost/hub", {
+      headers: { Upgrade: "websocket" },
+    });
     expect(r.status).toBe(401);
     const r2 = await SELF.fetch("https://app.localhost/hub", {
-      headers: { Upgrade: "websocket", Authorization: "Bearer ob_machine_" + "a".repeat(32) },
+      headers: {
+        Upgrade: "websocket",
+        Authorization: "Bearer ob_machine_" + "a".repeat(32),
+      },
     });
     expect(r2.status).toBe(401);
   });
@@ -1718,11 +1962,20 @@ describe("hub socket", () => {
     expect(ok.machine_id).toBe(m.id);
 
     d.send({
-      v: 1, id: "u1", type: "agent_up", agent_ref: "ses_a", kind: "opencode",
-      proposed_name: "OpenBus Backend", namespace: "github.com/a/b", global: false,
+      v: 1,
+      id: "u1",
+      type: "agent_up",
+      agent_ref: "ses_a",
+      kind: "opencode",
+      proposed_name: "OpenBus Backend",
+      namespace: "github.com/a/b",
+      global: false,
     });
     const reg = await waitFor(d, "agent_ok");
-    expect(reg).toMatchObject({ agent_ref: "ses_a", bus_name: "OpenBus Backend" });
+    expect(reg).toMatchObject({
+      agent_ref: "ses_a",
+      bus_name: "OpenBus Backend",
+    });
     d.close();
   });
 
@@ -1731,8 +1984,20 @@ describe("hub socket", () => {
     const d = await daemon(m.token);
     d.send(hello("h"));
     await waitFor(d, "hello_ok");
-    for (const [id, ref] of [["u1", "ses_a"], ["u2", "ses_b"]] as const) {
-      d.send({ v: 1, id, type: "agent_up", agent_ref: ref, kind: "opencode", proposed_name: "Claude", namespace: "ns", global: false });
+    for (const [id, ref] of [
+      ["u1", "ses_a"],
+      ["u2", "ses_b"],
+    ] as const) {
+      d.send({
+        v: 1,
+        id,
+        type: "agent_up",
+        agent_ref: ref,
+        kind: "opencode",
+        proposed_name: "Claude",
+        namespace: "ns",
+        global: false,
+      });
     }
     expect((await waitFor(d, "agent_ok")).bus_name).toBe("Claude");
     const second = await waitFor(d, "agent_ok");
@@ -1745,13 +2010,31 @@ describe("hub socket", () => {
     const a = await daemon(m.token);
     a.send(hello("h"));
     await waitFor(a, "hello_ok");
-    a.send({ v: 1, id: "u1", type: "agent_up", agent_ref: "ses_a", kind: "opencode", proposed_name: "Pi", namespace: "ns", global: false });
+    a.send({
+      v: 1,
+      id: "u1",
+      type: "agent_up",
+      agent_ref: "ses_a",
+      kind: "opencode",
+      proposed_name: "Pi",
+      namespace: "ns",
+      global: false,
+    });
     await waitFor(a, "agent_ok");
     a.send({ v: 1, id: "d1", type: "agent_down", agent_ref: "ses_a" });
     await waitFor(a, "roster_changed");
     a.send(hello("h2"));
     await waitFor(a, "hello_ok");
-    a.send({ v: 1, id: "u2", type: "agent_up", agent_ref: "ses_b", kind: "pi", proposed_name: "Pi", namespace: "ns", global: false });
+    a.send({
+      v: 1,
+      id: "u2",
+      type: "agent_up",
+      agent_ref: "ses_b",
+      kind: "pi",
+      proposed_name: "Pi",
+      namespace: "ns",
+      global: false,
+    });
     expect((await waitFor(a, "agent_ok")).bus_name).toBe("Pi");
     a.close();
   });
@@ -1760,7 +2043,9 @@ describe("hub socket", () => {
     const m = await machine();
     const first = await daemon(m.token);
     const second = await daemon(m.token);
-    const code = await new Promise<number>((resolve) => first.ws.addEventListener("close", (e) => resolve(e.code)));
+    const code = await new Promise<number>((resolve) =>
+      first.ws.addEventListener("close", (e) => resolve(e.code)),
+    );
     expect(code).toBe(1000);
     second.close();
   });
@@ -1773,27 +2058,54 @@ describe("hub socket", () => {
 import { describe, expect, it } from "vitest";
 import { daemon, machine, waitFor } from "./helpers.js";
 
-const up = (id: string, ref: string, name: string, ns = "ns") => ({
-  v: 1, id, type: "agent_up", agent_ref: ref, kind: "opencode",
-  proposed_name: name, namespace: ns, global: false,
-}) as const;
+const up = (id: string, ref: string, name: string, ns = "ns") =>
+  ({
+    v: 1,
+    id,
+    type: "agent_up",
+    agent_ref: ref,
+    kind: "opencode",
+    proposed_name: name,
+    namespace: ns,
+    global: false,
+  }) as const;
 
 describe("identity", () => {
   it("rejects a send whose from_ref is not registered on this socket", async () => {
     const m = await machine();
     const d = await daemon(m.token);
-    d.send({ v: 1, id: "h", type: "hello", machine_label: "MacBook", client_version: "0.1.0" });
+    d.send({
+      v: 1,
+      id: "h",
+      type: "hello",
+      machine_label: "MacBook",
+      client_version: "0.1.0",
+    });
     await waitFor(d, "hello_ok");
     d.send(up("u1", "ses_a", "Mine"));
     await waitFor(d, "agent_ok");
 
     // ses_other belongs to no agent on this machine.
-    d.send({ v: 1, id: "s1", type: "send", from_ref: "ses_other", to_name: "Mine", body: "spoof" });
+    d.send({
+      v: 1,
+      id: "s1",
+      type: "send",
+      from_ref: "ses_other",
+      to_name: "Mine",
+      body: "spoof",
+    });
     const err = await waitFor(d, "error");
     expect(err.code).toBe("not_registered");
 
     // Nothing was accepted: the same agent may send to itself and gets a receipt.
-    d.send({ v: 1, id: "s2", type: "send", from_ref: "ses_a", to_name: "Mine", body: "hi" });
+    d.send({
+      v: 1,
+      id: "s2",
+      type: "send",
+      from_ref: "ses_a",
+      to_name: "Mine",
+      body: "hi",
+    });
     const receipt = await waitFor(d, "receipt");
     expect(receipt.msg_id).toHaveLength(16);
     d.close();
@@ -1802,9 +2114,23 @@ describe("identity", () => {
   it("rejects frames that are not client frames", async () => {
     const m = await machine();
     const d = await daemon(m.token);
-    d.send({ v: 1, id: "h", type: "hello", machine_label: "m", client_version: "0.1.0" });
+    d.send({
+      v: 1,
+      id: "h",
+      type: "hello",
+      machine_label: "m",
+      client_version: "0.1.0",
+    });
     await waitFor(d, "hello_ok");
-    d.ws.send(JSON.stringify({ v: 1, id: "x", type: "receipt", msg_id: "a".repeat(16), state: "delivered" }));
+    d.ws.send(
+      JSON.stringify({
+        v: 1,
+        id: "x",
+        type: "receipt",
+        msg_id: "a".repeat(16),
+        state: "delivered",
+      }),
+    );
     expect((await waitFor(d, "error")).code).toBe("bad_frame");
     d.close();
   });
@@ -1815,7 +2141,6 @@ describe("identity", () => {
 
 Run: `pnpm --filter @ob/server test -- test/hub.socket.test.ts`
 Expected: FAIL — `/hub` returns 404.
-
 - [ ] **Step 4: Write the hub's socket layer**
 
 Add to `hub/do.ts` (imports: `CLIENT_FRAMES`, `PING`, `PONG`, `ServerFrame`, `ClientFrame`, `AgentRow`, `AGENT_COLS`, `decodeFrame`, `encodeFrame`, `frameId`, `candidateName`, `suffixName`, `AgentUpFrame`, `isMachineId`):
@@ -2042,7 +2367,6 @@ B10 adds the dashboard observer broadcast to this method.
 Call sites: `this.notifyRoster([frame.namespace])` in `agentUp`, `this.notifyRoster([agent.namespace])` in `agentDown`, `this.notifyRoster([])` in `webSocketClose`.
 
 `hub/names.ts` is not needed: `candidateName`/`suffixName` come from `@ob/shared`.
-
 - [ ] **Step 5: Add the Worker's `/hub` route**
 
 `apps/server/src/routes/hub.ts`:
@@ -2061,16 +2385,18 @@ export function mountHub(app: AppType): void {
     if (c.req.header("upgrade")?.toLowerCase() !== "websocket")
       throw new ApiError("bad_request", "Expected a WebSocket upgrade");
     const token = BEARER.exec(c.req.header("authorization") ?? "")?.[1] ?? "";
-    if (!isMachineToken(token)) throw new ApiError("unauthorized", "Invalid machine token");
+    if (!isMachineToken(token))
+      throw new ApiError("unauthorized", "Invalid machine token");
     const h = hub(c.env);
     const machine = await h.verifyToken(await sha256Hex(token));
     if (!machine) throw new ApiError("unauthorized", "Invalid machine token");
     // The Worker never speaks the protocol: it forwards the upgrade with the
     // machine id it just proved, which the hub trusts (same binding).
-    return c.env.HUB.get(c.env.HUB.idFromName(machine.id === "" ? "" : "owner"))
-      .fetch("https://hub.internal/hub", {
-        headers: { Upgrade: "websocket", "X-Ob-Machine-Id": machine.id },
-      });
+    return c.env.HUB.get(
+      c.env.HUB.idFromName(machine.id === "" ? "" : "owner"),
+    ).fetch("https://hub.internal/hub", {
+      headers: { Upgrade: "websocket", "X-Ob-Machine-Id": machine.id },
+    });
   });
 }
 ```
@@ -2078,21 +2404,25 @@ export function mountHub(app: AppType): void {
 Use `hub(c.env)`'s stub for the forward instead of repeating idFromName. Add `fetchHub(env, machineId, path, init)` to `hub/stub.ts`:
 
 ```ts
-export function hubFetch(env: Pick<Env, "HUB">, path: string, init: RequestInit = {}): Promise<Response> {
+export function hubFetch(
+  env: Pick<Env, "HUB">,
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
   const ns = env.HUB;
-  return ns.get(ns.idFromName(OWNER_ORG_ID)).fetch(`https://hub.internal${path}`, init);
+  return ns
+    .get(ns.idFromName(OWNER_ORG_ID))
+    .fetch(`https://hub.internal${path}`, init);
 }
 ```
 
 and the route returns `hubFetch(c.env, "/hub", { headers: { Upgrade: "websocket", "X-Ob-Machine-Id": machine.id } })`.
-
 - [ ] **Step 6: Mount and run**
 
 Mount in `routes/index.ts`: `mountHub(app);`
 
 Run: `pnpm --filter @ob/server test -- test/hub.socket.test.ts test/hub.from_ref.test.ts`
 Expected: PASS (7 tests). `send` and `fetch` are not implemented until B6/B8; the from_ref test only asserts the identity rejection, so it passes once the socket layer exists. If it reaches `handleSend` before B6, keep that test focused on `not_registered` and re-enable the receipt half in B6.
-
 - [ ] **Step 7: Commit**
 
 ```bash
@@ -2115,65 +2445,139 @@ import { describe, expect, it } from "vitest";
 import { LIMITS } from "@ob/shared";
 import { daemon, machine, waitFor } from "./helpers.js";
 
-const up = (id: string, ref: string, name: string, ns = "ns") => ({
-  v: 1, id, type: "agent_up", agent_ref: ref, kind: "opencode",
-  proposed_name: name, namespace: ns, global: false,
-}) as const;
-const hello = (id: string) => ({ v: 1, id, type: "hello", machine_label: "m", client_version: "0.1.0" }) as const;
+const up = (id: string, ref: string, name: string, ns = "ns") =>
+  ({
+    v: 1,
+    id,
+    type: "agent_up",
+    agent_ref: ref,
+    kind: "opencode",
+    proposed_name: name,
+    namespace: ns,
+    global: false,
+  }) as const;
+const hello = (id: string) =>
+  ({
+    v: 1,
+    id,
+    type: "hello",
+    machine_label: "m",
+    client_version: "0.1.0",
+  }) as const;
 
 describe("mail", () => {
   it("delivers inline, acks, and reports delivered", async () => {
     const m = await machine();
     const sender = await daemon(m.token);
     const receiver = await daemon(m.token);
-    sender.send(hello("h1")); await waitFor(sender, "hello_ok");
-    receiver.send(hello("h2")); await waitFor(receiver, "hello_ok");
-    sender.send(up("u1", "sref", "Sender")); await waitFor(sender, "agent_ok");
-    receiver.send(up("u2", "rref", "Receiver")); await waitFor(receiver, "agent_ok");
+    sender.send(hello("h1"));
+    await waitFor(sender, "hello_ok");
+    receiver.send(hello("h2"));
+    await waitFor(receiver, "hello_ok");
+    sender.send(up("u1", "sref", "Sender"));
+    await waitFor(sender, "agent_ok");
+    receiver.send(up("u2", "rref", "Receiver"));
+    await waitFor(receiver, "agent_ok");
 
-    sender.send({ v: 1, id: "s1", type: "send", from_ref: "sref", to_name: "Receiver", body: "hello" });
+    sender.send({
+      v: 1,
+      id: "s1",
+      type: "send",
+      from_ref: "sref",
+      to_name: "Receiver",
+      body: "hello",
+    });
     const receipt = await waitFor(sender, "receipt");
     expect(receipt.state).toBe("pending");
 
     const deliver = await waitFor(receiver, "deliver");
-    expect(deliver).toMatchObject({ to_ref: "rref", from_name: "Sender", namespace: "ns", body: "hello" });
+    expect(deliver).toMatchObject({
+      to_ref: "rref",
+      from_name: "Sender",
+      namespace: "ns",
+      body: "hello",
+    });
     receiver.send({ v: 1, id: "a1", type: "ack", msg_id: deliver.msg_id });
-    expect(await waitFor(sender, "receipt_update")).toMatchObject({ msg_id: deliver.msg_id, state: "delivered" });
-    sender.close(); receiver.close();
+    expect(await waitFor(sender, "receipt_update")).toMatchObject({
+      msg_id: deliver.msg_id,
+      state: "delivered",
+    });
+    sender.close();
+    receiver.close();
   });
 
   it("sends an oversized body as a notice and serves it on fetch", async () => {
     const m = await machine();
     const sender = await daemon(m.token);
     const receiver = await daemon(m.token);
-    sender.send(hello("h1")); await waitFor(sender, "hello_ok");
-    receiver.send(hello("h2")); await waitFor(receiver, "hello_ok");
-    sender.send(up("u1", "sref", "Sender")); await waitFor(sender, "agent_ok");
-    receiver.send(up("u2", "rref", "Receiver")); await waitFor(receiver, "agent_ok");
+    sender.send(hello("h1"));
+    await waitFor(sender, "hello_ok");
+    receiver.send(hello("h2"));
+    await waitFor(receiver, "hello_ok");
+    sender.send(up("u1", "sref", "Sender"));
+    await waitFor(sender, "agent_ok");
+    receiver.send(up("u2", "rref", "Receiver"));
+    await waitFor(receiver, "agent_ok");
 
     const big = "x".repeat(LIMITS.inlineBodyBytes + 1);
-    sender.send({ v: 1, id: "s1", type: "send", from_ref: "sref", to_name: "Receiver", body: big });
+    sender.send({
+      v: 1,
+      id: "s1",
+      type: "send",
+      from_ref: "sref",
+      to_name: "Receiver",
+      body: big,
+    });
     await waitFor(sender, "receipt");
     const deliver = await waitFor(receiver, "deliver");
     expect(deliver.body).toBeUndefined();
-    expect(deliver.notice).toEqual({ size: big.length, msg_id: deliver.msg_id });
+    expect(deliver.notice).toEqual({
+      size: big.length,
+      msg_id: deliver.msg_id,
+    });
 
-    receiver.send({ v: 1, id: "f1", type: "fetch", from_ref: "rref", msg_id: deliver.msg_id });
+    receiver.send({
+      v: 1,
+      id: "f1",
+      type: "fetch",
+      from_ref: "rref",
+      msg_id: deliver.msg_id,
+    });
     const body = await waitFor(receiver, "body");
     expect(body.body).toBe(big);
-    sender.close(); receiver.close();
+    sender.close();
+    receiver.close();
   });
 
   it("refuses over the hard cap and to an unknown agent", async () => {
     const m = await machine();
     const d = await daemon(m.token);
-    d.send(hello("h")); await waitFor(d, "hello_ok");
-    d.send(up("u1", "sref", "Sender")); await waitFor(d, "agent_ok");
+    d.send(hello("h"));
+    await waitFor(d, "hello_ok");
+    d.send(up("u1", "sref", "Sender"));
+    await waitFor(d, "agent_ok");
 
-    d.send({ v: 1, id: "s1", type: "send", from_ref: "sref", to_name: "Nobody", body: "x" });
-    expect(await waitFor(d, "receipt")).toMatchObject({ state: "refused", reason: "unknown_agent" });
+    d.send({
+      v: 1,
+      id: "s1",
+      type: "send",
+      from_ref: "sref",
+      to_name: "Nobody",
+      body: "x",
+    });
+    expect(await waitFor(d, "receipt")).toMatchObject({
+      state: "refused",
+      reason: "unknown_agent",
+    });
 
-    d.send({ v: 1, id: "s2", type: "send", from_ref: "sref", to_name: "Sender", body: "x".repeat(LIMITS.maxMessageBytes + 1) });
+    d.send({
+      v: 1,
+      id: "s2",
+      type: "send",
+      from_ref: "sref",
+      to_name: "Sender",
+      body: "x".repeat(LIMITS.maxMessageBytes + 1),
+    });
     expect((await waitFor(d, "error")).code).toBe("bad_frame"); // rejected by the frame schema before any work
     d.close();
   });
@@ -2182,23 +2586,44 @@ describe("mail", () => {
     const senderM = await machine("Sender");
     const receiverM = await machine("Receiver");
     const sender = await daemon(senderM.token);
-    sender.send(hello("h")); await waitFor(sender, "hello_ok");
-    sender.send(up("u1", "sref", "Sender")); await waitFor(sender, "agent_ok");
+    sender.send(hello("h"));
+    await waitFor(sender, "hello_ok");
+    sender.send(up("u1", "sref", "Sender"));
+    await waitFor(sender, "agent_ok");
 
     // The receiver registers, then its machine goes offline without a close
     // frame: the agent stays live, so its mail queues.
     const receiver = await daemon(receiverM.token);
-    receiver.send(hello("h2")); await waitFor(receiver, "hello_ok");
-    receiver.send(up("u2", "rref", "Receiver")); await waitFor(receiver, "agent_ok");
+    receiver.send(hello("h2"));
+    await waitFor(receiver, "hello_ok");
+    receiver.send(up("u2", "rref", "Receiver"));
+    await waitFor(receiver, "agent_ok");
     receiver.close();
     await new Promise((r) => setTimeout(r, 50));
 
     for (let i = 0; i < LIMITS.inboxCap; i++) {
-      sender.send({ v: 1, id: `q${i}`, type: "send", from_ref: "sref", to_name: "Receiver", body: `m${i}` });
+      sender.send({
+        v: 1,
+        id: `q${i}`,
+        type: "send",
+        from_ref: "sref",
+        to_name: "Receiver",
+        body: `m${i}`,
+      });
       expect((await waitFor(sender, "receipt")).state).toBe("pending");
     }
-    sender.send({ v: 1, id: "over", type: "send", from_ref: "sref", to_name: "Receiver", body: "one too many" });
-    expect(await waitFor(sender, "receipt")).toMatchObject({ state: "refused", reason: "inbox_full" });
+    sender.send({
+      v: 1,
+      id: "over",
+      type: "send",
+      from_ref: "sref",
+      to_name: "Receiver",
+      body: "one too many",
+    });
+    expect(await waitFor(sender, "receipt")).toMatchObject({
+      state: "refused",
+      reason: "inbox_full",
+    });
     sender.close();
   });
 
@@ -2206,23 +2631,51 @@ describe("mail", () => {
     const m = await machine();
     const sender = await daemon(m.token);
     const receiver = await daemon(m.token);
-    sender.send(hello("h1")); await waitFor(sender, "hello_ok");
-    receiver.send(hello("h2")); await waitFor(receiver, "hello_ok");
-    sender.send(up("u1", "sref", "Sender")); await waitFor(sender, "agent_ok");
-    receiver.send(up("u2", "rref", "Receiver")); await waitFor(receiver, "agent_ok");
+    sender.send(hello("h1"));
+    await waitFor(sender, "hello_ok");
+    receiver.send(hello("h2"));
+    await waitFor(receiver, "hello_ok");
+    sender.send(up("u1", "sref", "Sender"));
+    await waitFor(sender, "agent_ok");
+    receiver.send(up("u2", "rref", "Receiver"));
+    await waitFor(receiver, "agent_ok");
 
-    sender.send({ v: 1, id: "s1", type: "send", from_ref: "sref", to_name: "Receiver", body: "hi" });
+    sender.send({
+      v: 1,
+      id: "s1",
+      type: "send",
+      from_ref: "sref",
+      to_name: "Receiver",
+      body: "hi",
+    });
     await waitFor(sender, "receipt");
     const deliver = await waitFor(receiver, "deliver");
-    receiver.send({ v: 1, id: "r1", type: "refuse", msg_id: deliver.msg_id, reason: "closed", detail: "denied" });
+    receiver.send({
+      v: 1,
+      id: "r1",
+      type: "refuse",
+      msg_id: deliver.msg_id,
+      reason: "closed",
+      detail: "denied",
+    });
     expect(await waitFor(sender, "receipt_update")).toMatchObject({
-      msg_id: deliver.msg_id, state: "refused", reason: "closed",
+      msg_id: deliver.msg_id,
+      state: "refused",
+      reason: "closed",
     });
     // A later ack cannot resurrect it.
     receiver.send({ v: 1, id: "a1", type: "ack", msg_id: deliver.msg_id });
-    sender.send({ v: 1, id: "s2", type: "send", from_ref: "sref", to_name: "Receiver", body: "second" });
+    sender.send({
+      v: 1,
+      id: "s2",
+      type: "send",
+      from_ref: "sref",
+      to_name: "Receiver",
+      body: "second",
+    });
     expect((await waitFor(sender, "receipt")).state).toBe("pending");
-    sender.close(); receiver.close();
+    sender.close();
+    receiver.close();
   });
 });
 ```
@@ -2231,7 +2684,6 @@ describe("mail", () => {
 
 Run: `pnpm --filter @ob/server test -- test/hub.mail.test.ts`
 Expected: FAIL — no `deliver` frame (send is unhandled).
-
 - [ ] **Step 3: Replace the mail stub in the dispatcher**
 
 In `webSocketMessage`, replace the combined case added in B5:
@@ -2260,7 +2712,6 @@ with:
 ```
 
 (`fetch` becomes real in B8.)
-
 - [ ] **Step 4: Implement send/deliver/ack**
 
 Add to `Hub` (imports: `RefusalReason`, `SendFrame`, `AckFrame`, `utf8Bytes`, `RECEIPT_COLS`, `ReceiptRow`; plus `import { logEvent } from "../util/log.js"`):
@@ -2448,7 +2899,6 @@ Add to `Hub` (imports: `RefusalReason`, `SendFrame`, `AckFrame`, `utf8Bytes`, `R
 
 Run: `pnpm --filter @ob/server test -- test/hub.mail.test.ts`
 Expected: PASS (5 tests).
-
 - [ ] **Step 6: Commit**
 
 ```bash
@@ -2472,59 +2922,108 @@ import { LIMITS } from "@ob/shared";
 import { daemon, e, machine, waitFor } from "./helpers.js";
 import { hub } from "../src/hub/stub.js";
 
-const up = (id: string, ref: string, name: string) => ({
-  v: 1, id, type: "agent_up", agent_ref: ref, kind: "opencode",
-  proposed_name: name, namespace: "ns", global: false,
-}) as const;
-const hello = (id: string) => ({ v: 1, id, type: "hello", machine_label: "m", client_version: "0.1.0" }) as const;
+const up = (id: string, ref: string, name: string) =>
+  ({
+    v: 1,
+    id,
+    type: "agent_up",
+    agent_ref: ref,
+    kind: "opencode",
+    proposed_name: name,
+    namespace: "ns",
+    global: false,
+  }) as const;
+const hello = (id: string) =>
+  ({
+    v: 1,
+    id,
+    type: "hello",
+    machine_label: "m",
+    client_version: "0.1.0",
+  }) as const;
 
 describe("reconnect", () => {
   it("queues while the machine is offline and delivers on reconnect", async () => {
     const senderM = await machine("Sender");
     const receiverM = await machine("Receiver");
     const sender = await daemon(senderM.token);
-    sender.send(hello("h")); await waitFor(sender, "hello_ok");
-    sender.send(up("u1", "sref", "Sender")); await waitFor(sender, "agent_ok");
+    sender.send(hello("h"));
+    await waitFor(sender, "hello_ok");
+    sender.send(up("u1", "sref", "Sender"));
+    await waitFor(sender, "agent_ok");
 
     // The receiver registered once, then went offline without saying so.
     const first = await daemon(receiverM.token);
-    first.send(hello("h2")); await waitFor(first, "hello_ok");
-    first.send(up("u2", "rref", "Receiver")); await waitFor(first, "agent_ok");
+    first.send(hello("h2"));
+    await waitFor(first, "hello_ok");
+    first.send(up("u2", "rref", "Receiver"));
+    await waitFor(first, "agent_ok");
     first.close();
     await new Promise((r) => setTimeout(r, 50));
 
-    sender.send({ v: 1, id: "s1", type: "send", from_ref: "sref", to_name: "Receiver", body: "queued" });
+    sender.send({
+      v: 1,
+      id: "s1",
+      type: "send",
+      from_ref: "sref",
+      to_name: "Receiver",
+      body: "queued",
+    });
     expect((await waitFor(sender, "receipt")).state).toBe("pending");
 
     const second = await daemon(receiverM.token);
-    second.send(hello("h3")); await waitFor(second, "hello_ok");
-    second.send({ v: 1, id: "se", type: "sessions", open: ["rref"], closed: [] });
-    second.send(up("u3", "rref", "Receiver")); await waitFor(second, "agent_ok");
+    second.send(hello("h3"));
+    await waitFor(second, "hello_ok");
+    second.send({
+      v: 1,
+      id: "se",
+      type: "sessions",
+      open: ["rref"],
+      closed: [],
+    });
+    second.send(up("u3", "rref", "Receiver"));
+    await waitFor(second, "agent_ok");
     const deliver = await waitFor(second, "deliver");
     expect(deliver.body).toBe("queued");
     second.send({ v: 1, id: "a1", type: "ack", msg_id: deliver.msg_id });
-    expect(await waitFor(sender, "receipt_update")).toMatchObject({ state: "delivered" });
-    sender.close(); second.close();
+    expect(await waitFor(sender, "receipt_update")).toMatchObject({
+      state: "delivered",
+    });
+    sender.close();
+    second.close();
   });
 
   it("expires queued mail at the TTL and never claims delivered", async () => {
     const senderM = await machine("Sender");
     const receiverM = await machine("Receiver");
     const sender = await daemon(senderM.token);
-    sender.send(hello("h")); await waitFor(sender, "hello_ok");
-    sender.send(up("u1", "sref", "Sender")); await waitFor(sender, "agent_ok");
+    sender.send(hello("h"));
+    await waitFor(sender, "hello_ok");
+    sender.send(up("u1", "sref", "Sender"));
+    await waitFor(sender, "agent_ok");
     const receiver = await daemon(receiverM.token);
-    receiver.send(hello("h2")); await waitFor(receiver, "hello_ok");
-    receiver.send(up("u2", "rref", "Receiver")); await waitFor(receiver, "agent_ok");
+    receiver.send(hello("h2"));
+    await waitFor(receiver, "hello_ok");
+    receiver.send(up("u2", "rref", "Receiver"));
+    await waitFor(receiver, "agent_ok");
     receiver.close();
     await new Promise((r) => setTimeout(r, 50));
 
-    sender.send({ v: 1, id: "s1", type: "send", from_ref: "sref", to_name: "Receiver", body: "later" });
+    sender.send({
+      v: 1,
+      id: "s1",
+      type: "send",
+      from_ref: "sref",
+      to_name: "Receiver",
+      body: "later",
+    });
     await waitFor(sender, "receipt");
 
     await hub(e).setClock(Date.now() + (LIMITS.mailTtlSec + 5) * 1000);
     await hub(e).runAlarmForTest();
-    expect(await waitFor(sender, "receipt_update")).toMatchObject({ state: "expired" });
+    expect(await waitFor(sender, "receipt_update")).toMatchObject({
+      state: "expired",
+    });
     sender.close();
   });
 
@@ -2532,24 +3031,44 @@ describe("reconnect", () => {
     const senderM = await machine("Sender");
     const receiverM = await machine("Receiver");
     const sender = await daemon(senderM.token);
-    sender.send(hello("h")); await waitFor(sender, "hello_ok");
-    sender.send(up("u1", "sref", "Sender")); await waitFor(sender, "agent_ok");
+    sender.send(hello("h"));
+    await waitFor(sender, "hello_ok");
+    sender.send(up("u1", "sref", "Sender"));
+    await waitFor(sender, "agent_ok");
     const receiver = await daemon(receiverM.token);
-    receiver.send(hello("h2")); await waitFor(receiver, "hello_ok");
-    receiver.send(up("u2", "rref", "Receiver")); await waitFor(receiver, "agent_ok");
+    receiver.send(hello("h2"));
+    await waitFor(receiver, "hello_ok");
+    receiver.send(up("u2", "rref", "Receiver"));
+    await waitFor(receiver, "agent_ok");
     receiver.close();
     await new Promise((r) => setTimeout(r, 50));
 
-    sender.send({ v: 1, id: "s1", type: "send", from_ref: "sref", to_name: "Receiver", body: "queued" });
+    sender.send({
+      v: 1,
+      id: "s1",
+      type: "send",
+      from_ref: "sref",
+      to_name: "Receiver",
+      body: "queued",
+    });
     await waitFor(sender, "receipt");
 
     const again = await daemon(receiverM.token);
-    again.send(hello("h3")); await waitFor(again, "hello_ok");
-    again.send({ v: 1, id: "se", type: "sessions", open: [], closed: ["rref"] });
-    expect(await waitFor(sender, "receipt_update")).toMatchObject({
-      state: "expired", reason: "recipient_closed",
+    again.send(hello("h3"));
+    await waitFor(again, "hello_ok");
+    again.send({
+      v: 1,
+      id: "se",
+      type: "sessions",
+      open: [],
+      closed: ["rref"],
     });
-    sender.close(); again.close();
+    expect(await waitFor(sender, "receipt_update")).toMatchObject({
+      state: "expired",
+      reason: "recipient_closed",
+    });
+    sender.close();
+    again.close();
   });
 });
 ```
@@ -2558,7 +3077,6 @@ describe("reconnect", () => {
 
 Run: `pnpm --filter @ob/server test -- test/hub.reconnect.test.ts`
 Expected: FAIL — `runAlarmForTest` and expiry are missing.
-
 - [ ] **Step 3: Implement expiry, flush and the alarm**
 
 Add to `Hub`:
@@ -2646,10 +3164,10 @@ Add to `Hub`:
 Finally reconnect the two hooks B5 left out:
 
 ```ts
-    // agentUp, just before the return:
-    this.flushQueued(this.agentForRef(machineId, frame.agent_ref)!);
-    // closeAgent, after the update:
-    this.expireAllPending(agent.id, "recipient_closed");
+// agentUp, just before the return:
+this.flushQueued(this.agentForRef(machineId, frame.agent_ref)!);
+// closeAgent, after the update:
+this.expireAllPending(agent.id, "recipient_closed");
 ```
 
 - [ ] **Step 4: Make the queued path arm the alarm**
@@ -2669,7 +3187,6 @@ In `deliverTo`, the offline branch must also arm expiry. Change the first lines 
 
 Run: `pnpm --filter @ob/server test -- test/hub.reconnect.test.ts`
 Expected: PASS (3 tests).
-
 - [ ] **Step 6: Commit**
 
 ```bash
@@ -2691,77 +3208,161 @@ git commit -m "feat(hub): TTL expiry, ack timeout and reconnect flush"
 import { describe, expect, it } from "vitest";
 import { daemon, machine, waitFor } from "./helpers.js";
 
-const up = (id: string, ref: string, name: string, ns: string, global = false) => ({
-  v: 1, id, type: "agent_up", agent_ref: ref, kind: "opencode",
-  proposed_name: name, namespace: ns, global,
-}) as const;
-const hello = (id: string) => ({ v: 1, id, type: "hello", machine_label: "m", client_version: "0.1.0" }) as const;
+const up = (
+  id: string,
+  ref: string,
+  name: string,
+  ns: string,
+  global = false,
+) =>
+  ({
+    v: 1,
+    id,
+    type: "agent_up",
+    agent_ref: ref,
+    kind: "opencode",
+    proposed_name: name,
+    namespace: ns,
+    global,
+  }) as const;
+const hello = (id: string) =>
+  ({
+    v: 1,
+    id,
+    type: "hello",
+    machine_label: "m",
+    client_version: "0.1.0",
+  }) as const;
 
 async function connected(label: string) {
   const m = await machine(label);
   const d = await daemon(m.token);
-  d.send(hello("h")); await waitFor(d, "hello_ok");
+  d.send(hello("h"));
+  await waitFor(d, "hello_ok");
   return d;
 }
 
 describe("namespaces", () => {
   it("keeps namespaces invisible to each other", async () => {
     const a = await connected("A");
-    a.send(up("u1", "refA", "Alpha", "ns1")); await waitFor(a, "agent_ok");
-    a.send(up("u2", "refB", "Beta", "ns2")); await waitFor(a, "agent_ok");
+    a.send(up("u1", "refA", "Alpha", "ns1"));
+    await waitFor(a, "agent_ok");
+    a.send(up("u2", "refB", "Beta", "ns2"));
+    await waitFor(a, "agent_ok");
 
     a.send({ v: 1, id: "l1", type: "list", from_ref: "refA" });
     const roster = await waitFor(a, "roster");
     expect(roster.agents.map((x) => x.bus_name)).toEqual(["Alpha"]);
 
-    a.send({ v: 1, id: "s1", type: "send", from_ref: "refA", to_name: "Beta", body: "x" });
+    a.send({
+      v: 1,
+      id: "s1",
+      type: "send",
+      from_ref: "refA",
+      to_name: "Beta",
+      body: "x",
+    });
     // B8 ruling: other namespaces are "invisible and unreachable" (spec goal 5,
     // scenario 6), so this is unknown_agent; other_namespace is only for an
     // explicit to_namespace.
-    expect(await waitFor(a, "receipt")).toMatchObject({ state: "refused", reason: "unknown_agent" });
+    expect(await waitFor(a, "receipt")).toMatchObject({
+      state: "refused",
+      reason: "unknown_agent",
+    });
     a.close();
   });
 
   it("lets a global agent see and reach every namespace, and be reached", async () => {
     const a = await connected("A");
-    a.send(up("u1", "refA", "Alpha", "ns1")); await waitFor(a, "agent_ok");
-    a.send(up("u2", "refG", "Glob", "ns2", true)); await waitFor(a, "agent_ok");
+    a.send(up("u1", "refA", "Alpha", "ns1"));
+    await waitFor(a, "agent_ok");
+    a.send(up("u2", "refG", "Glob", "ns2", true));
+    await waitFor(a, "agent_ok");
 
     a.send({ v: 1, id: "l1", type: "list", from_ref: "refG" });
-    expect((await waitFor(a, "roster")).agents.map((x) => x.bus_name).sort()).toEqual(["Alpha", "Glob"]);
+    expect(
+      (await waitFor(a, "roster")).agents.map((x) => x.bus_name).sort(),
+    ).toEqual(["Alpha", "Glob"]);
 
-    a.send({ v: 1, id: "s1", type: "send", from_ref: "refG", to_name: "Alpha", body: "hi" });
+    a.send({
+      v: 1,
+      id: "s1",
+      type: "send",
+      from_ref: "refG",
+      to_name: "Alpha",
+      body: "hi",
+    });
     expect((await waitFor(a, "receipt")).state).toBe("pending");
 
     // Any agent can reach a global one.
-    a.send({ v: 1, id: "s2", type: "send", from_ref: "refA", to_name: "Glob", body: "yo" });
+    a.send({
+      v: 1,
+      id: "s2",
+      type: "send",
+      from_ref: "refA",
+      to_name: "Glob",
+      body: "yo",
+    });
     expect((await waitFor(a, "receipt")).state).toBe("pending");
 
     a.send({ v: 1, id: "l2", type: "list", from_ref: "refA" });
-    expect((await waitFor(a, "roster")).agents.map((x) => x.bus_name).sort()).toEqual(["Alpha", "Glob"]);
+    expect(
+      (await waitFor(a, "roster")).agents.map((x) => x.bus_name).sort(),
+    ).toEqual(["Alpha", "Glob"]);
     a.close();
   });
 
   it("lets the recipient fetch and refuses everyone else", async () => {
     const m = await machine();
     const d = await daemon(m.token);
-    d.send(hello("h")); await waitFor(d, "hello_ok");
-    d.send(up("u1", "a", "A", "ns")); await waitFor(d, "agent_ok");
-    d.send(up("u2", "b", "B", "ns")); await waitFor(d, "agent_ok");
-    d.send({ v: 1, id: "s1", type: "send", from_ref: "a", to_name: "B", body: "secret" });
+    d.send(hello("h"));
+    await waitFor(d, "hello_ok");
+    d.send(up("u1", "a", "A", "ns"));
+    await waitFor(d, "agent_ok");
+    d.send(up("u2", "b", "B", "ns"));
+    await waitFor(d, "agent_ok");
+    d.send({
+      v: 1,
+      id: "s1",
+      type: "send",
+      from_ref: "a",
+      to_name: "B",
+      body: "secret",
+    });
     await waitFor(d, "receipt");
     const deliver = await waitFor(d, "deliver");
 
     // The sender may not read the recipient's mail.
-    d.send({ v: 1, id: "f1", type: "fetch", from_ref: "a", msg_id: deliver.msg_id });
+    d.send({
+      v: 1,
+      id: "f1",
+      type: "fetch",
+      from_ref: "a",
+      msg_id: deliver.msg_id,
+    });
     expect((await waitFor(d, "error")).code).toBe("not_found");
 
     // The recipient may, and the fetch closes the receipt.
-    d.send({ v: 1, id: "f2", type: "fetch", from_ref: "b", msg_id: deliver.msg_id });
-    expect(await waitFor(d, "body")).toMatchObject({ msg_id: deliver.msg_id, body: "secret" });
+    d.send({
+      v: 1,
+      id: "f2",
+      type: "fetch",
+      from_ref: "b",
+      msg_id: deliver.msg_id,
+    });
+    expect(await waitFor(d, "body")).toMatchObject({
+      msg_id: deliver.msg_id,
+      body: "secret",
+    });
 
     // Once delivered, a second fetch finds nothing.
-    d.send({ v: 1, id: "f3", type: "fetch", from_ref: "b", msg_id: deliver.msg_id });
+    d.send({
+      v: 1,
+      id: "f3",
+      type: "fetch",
+      from_ref: "b",
+      msg_id: deliver.msg_id,
+    });
     expect((await waitFor(d, "error")).code).toBe("not_found");
     d.close();
   });
@@ -2772,7 +3373,6 @@ describe("namespaces", () => {
 
 Run: `pnpm --filter @ob/server test -- test/hub.namespace.matrix.test.ts`
 Expected: FAIL — `fetch` unhandled, roster lists both namespaces.
-
 - [ ] **Step 3: Implement `fetch` and tighten `list`**
 
 In `webSocketMessage`, replace:
@@ -2811,12 +3411,10 @@ with:
 ```
 
 Import `FetchFrame`.
-
 - [ ] **Step 4: Run the tests**
 
 Run: `pnpm --filter @ob/server test -- test/hub.namespace.matrix.test.ts`
 Expected: PASS (3 tests).
-
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -2840,54 +3438,98 @@ import { describe, expect, it } from "vitest";
 import { daemon, machine, session, waitFor } from "./helpers.js";
 import { hub } from "../src/hub/stub.js";
 
-const up = (id: string, ref: string, name: string) => ({
-  v: 1, id, type: "agent_up", agent_ref: ref, kind: "opencode",
-  proposed_name: name, namespace: "ns", global: false,
-}) as const;
+const up = (id: string, ref: string, name: string) =>
+  ({
+    v: 1,
+    id,
+    type: "agent_up",
+    agent_ref: ref,
+    kind: "opencode",
+    proposed_name: name,
+    namespace: "ns",
+    global: false,
+  }) as const;
 
 describe("revoke", () => {
   it("closes with 4403, drops agents, refuses reconnects and mail", async () => {
     const victimM = await machine("Victim");
     const senderM = await machine("Sender");
     const victim = await daemon(victimM.token);
-    victim.send({ v: 1, id: "h", type: "hello", machine_label: "Victim", client_version: "0.1.0" });
+    victim.send({
+      v: 1,
+      id: "h",
+      type: "hello",
+      machine_label: "Victim",
+      client_version: "0.1.0",
+    });
     await waitFor(victim, "hello_ok");
-    victim.send(up("u1", "vref", "Victim Agent")); await waitFor(victim, "agent_ok");
+    victim.send(up("u1", "vref", "Victim Agent"));
+    await waitFor(victim, "agent_ok");
 
     const sender = await daemon(senderM.token);
-    sender.send({ v: 1, id: "h", type: "hello", machine_label: "Sender", client_version: "0.1.0" });
-    await waitFor(sender, "hello_ok");
-    sender.send(up("u2", "sref", "Sender Agent")); await waitFor(sender, "agent_ok");
-
-    const closed = new Promise<number>((resolve) => victim.ws.addEventListener("close", (e) => resolve(e.code)));
-    const res = await SELF.fetch(`https://app.localhost/api/v1/machines/${victimM.id}`, {
-      method: "DELETE",
-      headers: { cookie: await session(), "X-OB-Request": "1" },
+    sender.send({
+      v: 1,
+      id: "h",
+      type: "hello",
+      machine_label: "Sender",
+      client_version: "0.1.0",
     });
+    await waitFor(sender, "hello_ok");
+    sender.send(up("u2", "sref", "Sender Agent"));
+    await waitFor(sender, "agent_ok");
+
+    const closed = new Promise<number>((resolve) =>
+      victim.ws.addEventListener("close", (e) => resolve(e.code)),
+    );
+    const res = await SELF.fetch(
+      `https://app.localhost/api/v1/machines/${victimM.id}`,
+      {
+        method: "DELETE",
+        headers: { cookie: await session(), "X-OB-Request": "1" },
+      },
+    );
     expect(res.status).toBe(204);
     expect(await closed).toBe(4403);
 
     // Its agents left the roster.
     sender.send({ v: 1, id: "l1", type: "list", from_ref: "sref" });
-    expect((await waitFor(sender, "roster")).agents.map((a) => a.bus_name)).toEqual(["Sender Agent"]);
+    expect(
+      (await waitFor(sender, "roster")).agents.map((a) => a.bus_name),
+    ).toEqual(["Sender Agent"]);
 
     // Sends to the revoked agent are refused with `revoked`.
-    sender.send({ v: 1, id: "s1", type: "send", from_ref: "sref", to_name: "Victim Agent", body: "x" });
-    expect(await waitFor(sender, "receipt")).toMatchObject({ state: "refused", reason: "revoked" });
+    sender.send({
+      v: 1,
+      id: "s1",
+      type: "send",
+      from_ref: "sref",
+      to_name: "Victim Agent",
+      body: "x",
+    });
+    expect(await waitFor(sender, "receipt")).toMatchObject({
+      state: "refused",
+      reason: "revoked",
+    });
 
     // Reconnect is refused at the Worker.
     const again = await SELF.fetch("https://app.localhost/hub", {
-      headers: { Upgrade: "websocket", Authorization: `Bearer ${victimM.token}` },
+      headers: {
+        Upgrade: "websocket",
+        Authorization: `Bearer ${victimM.token}`,
+      },
     });
     expect(again.status).toBe(401);
     sender.close();
   });
 
   it("404s an unknown machine", async () => {
-    const res = await SELF.fetch("https://app.localhost/api/v1/machines/aaaaaaaaaaaaaaaa", {
-      method: "DELETE",
-      headers: { cookie: await session(), "X-OB-Request": "1" },
-    });
+    const res = await SELF.fetch(
+      "https://app.localhost/api/v1/machines/aaaaaaaaaaaaaaaa",
+      {
+        method: "DELETE",
+        headers: { cookie: await session(), "X-OB-Request": "1" },
+      },
+    );
     expect(res.status).toBe(404);
   });
 });
@@ -2897,7 +3539,6 @@ describe("revoke", () => {
 
 Run: `pnpm --filter @ob/server test -- test/revoke.test.ts`
 Expected: FAIL — 404 on `/api/v1/machines/:id` (no handler).
-
 - [ ] **Step 3: Implement `revokeMachine` and the `revoked` refusal**
 
 Add to `Hub`:
@@ -2943,7 +3584,6 @@ Add to `Hub`:
 ```
 
 and place it before the `closed` check, since a revoked agent is also not live.
-
 - [ ] **Step 4: Add the REST routes**
 
 `apps/server/src/hub/dto.ts` (agent DTO joins in B10):
@@ -2990,12 +3630,10 @@ export function mountMachines(app: AppType): void {
 ```
 
 `MachinesResponseSchema.parse` is the runtime assertion at the boundary; the DTO is the only place epoch ms becomes ISO. Add `mountMachines(app);` to `mountRoutes`.
-
 - [ ] **Step 5: Run the tests**
 
 Run: `pnpm --filter @ob/server test -- test/revoke.test.ts`
 Expected: PASS (2 tests).
-
 - [ ] **Step 6: Commit**
 
 ```bash
@@ -3027,27 +3665,65 @@ import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { daemon, machine, session, waitFor } from "./helpers.js";
 
-const hello = (id: string) => ({ v: 1, id, type: "hello", machine_label: "m", client_version: "0.1.0" }) as const;
+const hello = (id: string) =>
+  ({
+    v: 1,
+    id,
+    type: "hello",
+    machine_label: "m",
+    client_version: "0.1.0",
+  }) as const;
 
 describe("dashboard API", () => {
   it("serves me and the roster", async () => {
     const m = await machine("Studio");
     const d = await daemon(m.token);
-    d.send(hello("h")); await waitFor(d, "hello_ok");
-    d.send({ v: 1, id: "u1", type: "agent_up", agent_ref: "r1", kind: "pi", proposed_name: "Pi", namespace: "github.com/a/b", global: false });
+    d.send(hello("h"));
+    await waitFor(d, "hello_ok");
+    d.send({
+      v: 1,
+      id: "u1",
+      type: "agent_up",
+      agent_ref: "r1",
+      kind: "pi",
+      proposed_name: "Pi",
+      namespace: "github.com/a/b",
+      global: false,
+    });
     await waitFor(d, "agent_ok");
 
     const cookie = await session();
-    const me = await (await SELF.fetch("https://app.localhost/api/v1/me", { headers: { cookie } })).json();
-    expect(me).toEqual({ user: { id: "owner", email: "owner@example.com", name: null } });
+    const me = await (
+      await SELF.fetch("https://app.localhost/api/v1/me", {
+        headers: { cookie },
+      })
+    ).json();
+    expect(me).toEqual({
+      user: { id: "owner", email: "owner@example.com", name: null },
+    });
 
-    const machines = await (await SELF.fetch("https://app.localhost/api/v1/machines", { headers: { cookie } })).json();
-    expect(machines.machines.find((x: { id: string }) => x.id === m.id))
-      .toMatchObject({ label: "Studio", lastUsed: null, revokedAt: null });
+    const machines = await (
+      await SELF.fetch("https://app.localhost/api/v1/machines", {
+        headers: { cookie },
+      })
+    ).json();
+    expect(
+      machines.machines.find((x: { id: string }) => x.id === m.id),
+    ).toMatchObject({ label: "Studio", lastUsed: null, revokedAt: null });
 
-    const agents = await (await SELF.fetch("https://app.localhost/api/v1/agents?namespace=github.com/a/b", { headers: { cookie } })).json();
+    const agents = await (
+      await SELF.fetch(
+        "https://app.localhost/api/v1/agents?namespace=github.com/a/b",
+        { headers: { cookie } },
+      )
+    ).json();
     expect(agents.agents).toHaveLength(1);
-    expect(agents.agents[0]).toMatchObject({ name: "Pi", kind: "pi", live: true, machineLabel: "Studio" });
+    expect(agents.agents[0]).toMatchObject({
+      name: "Pi",
+      kind: "pi",
+      live: true,
+      machineLabel: "Studio",
+    });
     d.close();
   });
 
@@ -3086,7 +3762,6 @@ describe("dashboard API", () => {
 
 Run: `pnpm --filter @ob/server test -- test/events.test.ts`
 Expected: FAIL — `/api/v1/me` has no handler.
-
 - [ ] **Step 3: Write the DTO builders and observers**
 
 Append to `apps/server/src/hub/dto.ts` (created in B9; keep its `iso` helper):
@@ -3182,7 +3857,6 @@ Replace the no-op `notifyMachines` added in B4 with this one, and add
 from `../hub/dto.js` (`machineDto` came in B9).
 
 `notifyMachines` is referenced by B4/B5; it now exists.
-
 - [ ] **Step 4: Write the REST and SSE routes**
 
 `apps/server/src/routes/me.ts`:
@@ -3194,9 +3868,15 @@ import type { AppType } from "./types.js";
 
 export function mountMe(app: AppType): void {
   app.get(R.me, (c) =>
-    c.json(MeSchema.parse({
-      user: { id: OWNER_UID, email: c.env.OWNER_EMAIL.toLowerCase(), name: null },
-    })),
+    c.json(
+      MeSchema.parse({
+        user: {
+          id: OWNER_UID,
+          email: c.env.OWNER_EMAIL.toLowerCase(),
+          name: null,
+        },
+      }),
+    ),
   );
 }
 ```
@@ -3210,8 +3890,14 @@ import type { AppType } from "./types.js";
 
 export function mountAgents(app: AppType): void {
   app.get(R.agents, async (c) => {
-    const q = AgentListQuerySchema.parse({ namespace: c.req.query("namespace") || undefined });
-    return c.json(AgentsResponseSchema.parse({ agents: await hub(c.env).listAgents(q.namespace) }));
+    const q = AgentListQuerySchema.parse({
+      namespace: c.req.query("namespace") || undefined,
+    });
+    return c.json(
+      AgentsResponseSchema.parse({
+        agents: await hub(c.env).listAgents(q.namespace),
+      }),
+    );
   });
 }
 ```
@@ -3234,13 +3920,18 @@ export function mountEvents(app: AppType): void {
     if (origin !== undefined && origin !== new URL(c.req.url).origin)
       throw new ApiError("csrf", "Cross-site request");
 
-    const res = await hubFetch(c.env, "/events", { headers: { Upgrade: "websocket" } });
+    const res = await hubFetch(c.env, "/events", {
+      headers: { Upgrade: "websocket" },
+    });
     const ws = res.webSocket;
     if (!ws) throw new ApiError("internal", "Hub did not upgrade");
     ws.accept();
 
     const enc = new TextEncoder();
-    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+    const { readable, writable } = new TransformStream<
+      Uint8Array,
+      Uint8Array
+    >();
     const writer = writable.getWriter();
     let closed = false;
     const write = (chunk: string) => {
@@ -3262,7 +3953,9 @@ export function mountEvents(app: AppType): void {
       }
       const parsed = BusEventSchema.safeParse(raw);
       if (!parsed.success) return;
-      write(`event: ${parsed.data.type}\ndata: ${JSON.stringify(parsed.data)}\n\n`);
+      write(
+        `event: ${parsed.data.type}\ndata: ${JSON.stringify(parsed.data)}\n\n`,
+      );
     });
     ws.addEventListener("close", () => {
       closed = true;
@@ -3284,12 +3977,10 @@ export function mountEvents(app: AppType): void {
 The `try` around `JSON.parse` is load-bearing: a malformed hub payload must never throw out of a listener.
 
 Mount all: `mountMe(app); mountAgents(app); mountMachines(app); mountEvents(app);`
-
 - [ ] **Step 5: Run the tests**
 
 Run: `pnpm --filter @ob/server test -- test/events.test.ts`
 Expected: PASS (3 tests).
-
 - [ ] **Step 6: Commit**
 
 ```bash
@@ -3322,7 +4013,11 @@ git commit -m "feat(server): me, live roster and machines over REST and SSE"
   "durable_objects": { "bindings": [{ "name": "HUB", "class_name": "Hub" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Hub"] }],
   "ratelimits": [
-    { "name": "RL_DEVICE", "namespace_id": "2001", "simple": { "limit": 20, "period": 60 } }
+    {
+      "name": "RL_DEVICE",
+      "namespace_id": "2001",
+      "simple": { "limit": 20, "period": 60 }
+    }
   ],
   "vars": {
     "ENVIRONMENT": "production",
@@ -3337,14 +4032,16 @@ git commit -m "feat(server): me, live roster and machines over REST and SSE"
 ```
 
 Add `RL_DEVICE` to `wrangler.test.jsonc` only if the plugin accepts `ratelimits` locally; otherwise leave it unbound (the handler already tolerates that in dev).
-
 - [ ] **Step 2: Structured, secret-free logging**
 
 `apps/server/src/util/log.ts`:
 
 ```ts
 /** One JSON line per event. Never tokens, codes, bodies, emails or secrets. */
-export function logEvent(evt: string, fields: Record<string, string | number | boolean | null> = {}): void {
+export function logEvent(
+  evt: string,
+  fields: Record<string, string | number | boolean | null> = {},
+): void {
   console.log(JSON.stringify({ evt, ...fields }));
 }
 
@@ -3355,7 +4052,6 @@ export function logError(evt: string, err: unknown): void {
 ```
 
 Use it in: `oidc_fail` (already logged by the copied code), `device_code`, `device_approved`, `machine_revoked`, `hub_reject` (code only). Add `logEvent("machine_revoked", { machineId: id })` in `revokeMachine`, and `logEvent("hub_reject", { code, machine: machineId })` in `reject`.
-
 - [ ] **Step 3: Cap per-socket abuse**
 
 In `webSocketMessage`, before `decodeFrame`, add a per-socket budget kept in the attachment:
@@ -3370,16 +4066,15 @@ In `webSocketMessage`, before `decodeFrame`, add a per-socket budget kept in the
 ```
 
 This also means the machineId read later must come from `meta`.
-
 - [ ] **Step 4: Test the device limiter is bypassable only in dev**
 
 Extend `device.test.ts`:
 
 ```ts
-  it("still answers /healthz and /device/code without a limiter in dev", async () => {
-    const r = await post("/device/code", {});
-    expect(r.status).toBe(201);
-  });
+it("still answers /healthz and /device/code without a limiter in dev", async () => {
+  const r = await post("/device/code", {});
+  expect(r.status).toBe(201);
+});
 ```
 
 - [ ] **Step 5: Run the whole suite and commit**
@@ -3402,7 +4097,6 @@ git commit -m "feat(server): device rate limit, structured logs and per-socket b
 - Pinned files: `hub.from_ref`, `hub.namespace.matrix`, `hub.expiry` (was `hub.reconnect`), `hub.revoke` (was `revoke`), `hub.b11`, `hub.b11.adv`, `hub.events`. The device smoke step is B4's and is not part of B12.
 
 > **Required (manager, after #54):** the quiet-runner job runs `@ob/shared`'s opt-in decode-timing test, `OB_PERF=1 pnpm --filter @ob/shared exec vitest run src/protocol.test.ts -t "decode fast"`, next to the hub CPU guard. Wall-clock timing flakes on shared CI runners, so neither runs in the PR gate.
-
 - **CPU guard (`test/cpu.test.ts`).** Opt-in: the whole `describe` is `skipIf(!OB_PERF)`; run it with `OB_PERF=1 pnpm --filter @ob/server exec vitest run test/cpu.test.ts`. It measures the warm, median-of-N wall-clock round trip through a real hub socket for: `send` at 1 KiB and at the 32 KiB inline max, `agent_up`, `sessions{closed}` with 1000 refs (200 live, 10,000 pending), a close with 500k delivered receipts in history, a dashboard push at the caps (100 machines, 1000 agents), one alarm step with a full `SWEEP_BATCH`, and `fetch` of a 1 MiB body. Each path has a named budget constant (measured median x2 to 3); a breach fails with the path name, and a table of medians prints at the end.
 - **Perf workflow (`.github/workflows/perf.yml`).** `schedule` (daily) and `workflow_dispatch` only, one job, concurrency 1; never `pull_request` or `merge_group`. It runs the two commands above.
 - **Pinned suite (`pnpm --filter @ob/server test:pinned`).** Runs the pinned files one at a time, in sequence, and reports every failure at the end. For the release check; the PR gate already runs these files inside `pnpm test`.
@@ -3410,17 +4104,17 @@ git commit -m "feat(server): device rate limit, structured logs and per-socket b
 
 Measured medians (ms, load average 11-14, three runs; `performance.now()` ticks in whole ms in workerd):
 
-| path | median | budget |
-| --- | --- | --- |
-| hello baseline | 1-3 | 8 |
-| send 1 KiB | 3-4 | 10 |
-| send 32 KiB | 3-4 | 10 |
-| agent_up | 2 | 6 |
-| sessions{closed} 1000 refs | 7-11 | 25 |
-| close, 500k delivered | 2-3 | 8 |
-| dashboard push (100 machines, 1000 agents) | 8-9 | 22 |
-| alarm, full SWEEP_BATCH | 3 | 9 |
-| fetch 1 MiB | 3-6 | 15 |
+| path                                       | median | budget |
+| ------------------------------------------ | ------ | ------ |
+| hello baseline                             | 1-3    | 8      |
+| send 1 KiB                                 | 3-4    | 10     |
+| send 32 KiB                                | 3-4    | 10     |
+| agent_up                                   | 2      | 6      |
+| sessions{closed} 1000 refs                 | 7-11   | 25     |
+| close, 500k delivered                      | 2-3    | 8      |
+| dashboard push (100 machines, 1000 agents) | 8-9    | 22     |
+| alarm, full SWEEP_BATCH                    | 3      | 9      |
+| fetch 1 MiB                                | 3-6    | 15     |
 
 Staging smoke (`/healthz` version, `/device/code`) belongs to Platform's deploy pipeline (B4/F4), not B12.
 
@@ -3551,7 +4245,6 @@ create index if not exists roles_lrole on roles(org_id, lrole);
 - `listRoles(sql): RoleRow[]`, joining the holder's name when it is live.
 
 Rulings: each agent holds at most one role (`agent_has_role` becomes 409). Roles compare case-insensitively, like names.
-
 - [ ] **Step 1: Write the failing tests.**
   - `setRole` refuses `bad_agent` for a closed agent, an agent in another namespace, or an unknown agent; it allows a global agent.
   - It refuses `name_taken` when an open agent is named `Lane-6` and the role is `lane-6`.
@@ -3621,7 +4314,6 @@ Scoping matches names:
 - `clearStatus(sql, agentIds)`.
 
 Every applied change calls `#notifyDashboards()` and fans out `roster_changed` to the agent's namespace.
-
 - [ ] **Step 1: Write the failing tests.**
   - The first update shows in REST at once.
   - Three updates within 5 s leave the first one shown; after `alarmOnce` at +5 s (frozen clock), the third one is shown.
@@ -3701,7 +4393,6 @@ The order is fixed:
 6. `loadCardKeys`: null or `TestKeyError` gives `error internal`.
 
 Only then is the card signed.
-
 - [ ] **Step 1: Write the failing tests.**
   - The card verifies against the JWKS (Task 6) with `typ` `ob-card+jwt`, `exp − iat = 300`, `aud` equal to the requested one, and the `role` and `agent_says` claims.
   - There are no `email`, `namespace` or `machine_id` keys.
@@ -3748,14 +4439,14 @@ The flow:
 
 ## Delivery order
 
-| PR | Tasks | Review |
-| --- | --- | --- |
-| AC1 | 1 | spec + quality, shared heads-up |
-| AC2a | 2+3 | adversarial |
-| AC2b | 4 | spec + quality |
-| AC3 | 5 | spec + quality |
-| AC4a | 6 | adversarial |
-| AC4b | 7+8 | adversarial |
-| AC4c | 9 | adversarial |
+| PR   | Tasks | Review                          |
+| ---- | ----- | ------------------------------- |
+| AC1  | 1     | spec + quality, shared heads-up |
+| AC2a | 2+3   | adversarial                     |
+| AC2b | 4     | spec + quality                  |
+| AC3  | 5     | spec + quality                  |
+| AC4a | 6     | adversarial                     |
+| AC4b | 7+8   | adversarial                     |
+| AC4c | 9     | adversarial                     |
 
 AC2–AC4 depend on AC1. Within AC2–AC4, the order above is the default. AC3 and AC4a can run before AC2b.

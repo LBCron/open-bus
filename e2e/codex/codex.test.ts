@@ -505,7 +505,7 @@ describe("codex app-server (the desktop app's mode)", () => {
 });
 
 // The desktop app keeps a thread's adapter across an upgrade (#343): one from
-// before C27a sends no item id. old-adapter.mjs drops it from each request.
+// before C27a sends no item id. old-adapter.mjs drops it and says 0.61.0.
 describe("codex app-server in code mode, with an adapter from before C27a (C27k)", () => {
   it("is told to restart the Codex app, and nothing is delivered", async () => {
     const ws = codexWorkspace("cx-stale");
