@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.64.0](https://github.com/open-artifacts-ai/open-bus/compare/v0.63.0...v0.64.0) (2026-11-04)
+
+
+### Features
+
+* **shared:** rename frames, roster former_names and the rename gate ([#393](https://github.com/open-artifacts-ai/open-bus/issues/393)) ([#416](https://github.com/open-artifacts-ai/open-bus/issues/416)) ([19b3420](https://github.com/open-artifacts-ai/open-bus/commit/19b34202dbb6df446cb15d20ad0061eee2c40894))
+
+
+### Bug Fixes
+
+* **daemon:** global means the allowlisted directory itself ([#397](https://github.com/open-artifacts-ai/open-bus/issues/397)) ([#419](https://github.com/open-artifacts-ai/open-bus/issues/419)) ([6ec48d8](https://github.com/open-artifacts-ai/open-bus/commit/6ec48d8b3ad49f7b17f493dd4c5dd646b7df92e9))
+* **daemon:** tell a pre-upgrade Codex adapter to restart the app (C27k) ([#413](https://github.com/open-artifacts-ai/open-bus/issues/413)) ([12f2a79](https://github.com/open-artifacts-ai/open-bus/commit/12f2a7910a4c49e9e2d1fe60fda98e7c1b4e4a3e))
+
 ## [0.63.0](https://github.com/open-artifacts-ai/open-bus/compare/v0.62.0...v0.63.0) (2026-11-03)
 
 
