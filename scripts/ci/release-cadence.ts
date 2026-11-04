@@ -63,6 +63,8 @@ export const QUERY = `query($owner: String!, $name: String!, $head: String!, $br
               oid
               statusCheckRollup {
                 state
+                # Past 100 checks the approval status may be cut off: that
+                # fails safe, holding a release rather than shipping one.
                 contexts(first: 100) {
                   nodes {
                     __typename
@@ -564,7 +566,7 @@ export async function blocker(o: {
         ? [
             live
               ? `release PR #${pr.number} has been open for over 24 hours`
-              : `release PR #${pr.number} has waited over 3 days for ${OK_LABEL} on its current head`,
+              : `release PR #${pr.number} has waited over 3 days for ${OK_LABEL} on its current head (every release-please push needs ${OK_LABEL} removed and added again)`,
           ]
         : []),
     ];

@@ -47,9 +47,10 @@ arm back. To ship by hand, approve the head first.
 ### Trust boundary
 
 The approval is as strong as repo write access. Anyone with write can add
-`release-ok`, so the status check only stops a token that can write statuses
-but isn't the workflow's from forging an approval. A status with the right
-context but another creator doesn't approve.
+`release-ok`. The creator check only rejects a `release-ok` status written by
+a token other than GitHub Actions'; every workflow in the repo runs as
+`github-actions`, so any workflow could still write one. A status with the
+right context but another creator doesn't approve.
 
 ## Holding a release
 

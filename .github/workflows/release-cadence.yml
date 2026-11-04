@@ -1,7 +1,7 @@
 name: release-cadence
 # Arms the release-please PR once it is green and the merge queue has drained, and
-# keeps one `blocker` issue open while a release is stuck. A manual cut still works:
-# arm the release PR yourself at any time.
+# keeps one `blocker` issue open while a release is stuck. It arms only a head that
+# carries the release-ok approval (#445): approve the head first (add release-ok).
 on:
   # The retry loop: every 15 minutes (also covers the daily 15:00 pass), plus right
   # after CI and release-please finish. (check_suite does not fire for Actions suites.)
