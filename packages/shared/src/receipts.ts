@@ -19,7 +19,7 @@ export const REFUSAL_REASONS = [
   "other_namespace",
   "revoked",
   "ambiguous",
-  /** A role with no open holder. Sent only to daemons at or above AGENT_CARD_MIN_CLIENT; below it, `unknown_agent`. */
+  /** @deprecated never sent since #394; removal tracked in #396 */
   "role_vacant",
 ] as const;
 export const RefusalReasonSchema = z.enum(REFUSAL_REASONS);
@@ -58,8 +58,8 @@ export const receiptShape = {
   reason: ReceiptReasonSchema.optional(),
   /**
    * The resolved recipient's bus name when it differs from the name sent to:
-   * a role's holder (gated by AGENT_CARD_MIN_CLIENT) or, for a former name,
-   * the agent's current name (gated by RENAME_MIN_CLIENT, #393).
+   * for a former name, the agent's current name (gated by RENAME_MIN_CLIENT,
+   * #393). Hubs before #394 also sent a role's holder (AGENT_CARD_MIN_CLIENT).
    */
   to_name: BusNameSchema.optional(),
 } as const;

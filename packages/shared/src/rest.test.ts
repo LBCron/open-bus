@@ -11,9 +11,7 @@ import {
   MachineSchema,
   MachinesResponseSchema,
   MeSchema,
-  PutRoleBodySchema,
   R,
-  RolesResponseSchema,
 } from "./rest.js";
 
 const ISO = "2026-10-21T15:32:52.652Z";
@@ -160,7 +158,7 @@ describe("rest", () => {
         .success,
     ).toBe(false);
   });
-  it("an agent row carries role and status (agent card)", () => {
+  it("an agent row carries status, and still parses a deprecated role (agent card)", () => {
     const a = {
       ...agent,
       role: "lane-6",
@@ -173,13 +171,9 @@ describe("rest", () => {
       false,
     );
   });
-  it("pins the roles and linked-apps routes and DTOs", () => {
-    expect(R.roles).toBe("/api/v1/roles");
-    expect(R.role("github.com/a/b", "lane-6")).toBe(
-      "/api/v1/roles/github.com%2Fa%2Fb/lane-6",
-    );
-    expect(() => R.role("Bad NS", "lane-6")).toThrow(RangeError);
-    expect(() => R.role("a", "")).toThrow(RangeError);
+  it("pins the linked-apps routes and DTOs; the roles routes are gone (#394)", () => {
+    expect("roles" in R).toBe(false);
+    expect("role" in R).toBe(false);
     expect(R.linkedApps).toBe("/api/v1/linked-apps");
     expect(R.linkedApp("https://oa.example.com")).toBe(
       "/api/v1/linked-apps/https%3A%2F%2Foa.example.com",
@@ -188,21 +182,6 @@ describe("rest", () => {
     expect(R.link).toBe("/link");
     expect(R.linkConfirm).toBe("/link/confirm");
     expect(R.jwks).toBe("/.well-known/jwks.json");
-    const roles = {
-      roles: [
-        { namespace: "a/b", role: "lane-6", agentId: agent.id, setAt: ISO },
-        { namespace: "a/b", role: "lane-7", agentId: null, setAt: ISO },
-      ],
-    };
-    expect(RolesResponseSchema.parse(roles)).toEqual(roles);
-    const role = roles.roles[0];
-    expect(
-      RolesResponseSchema.safeParse({ roles: Array(1001).fill(role) }).success,
-    ).toBe(false);
-    expect(PutRoleBodySchema.safeParse({ agentId: agent.id }).success).toBe(
-      true,
-    );
-    expect(PutRoleBodySchema.safeParse({ agentId: "x" }).success).toBe(false);
     const apps = { apps: [{ aud: "https://oa.example.com", linkedAt: ISO }] };
     expect(LinkedAppsResponseSchema.parse(apps)).toEqual(apps);
     expect(

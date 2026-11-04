@@ -33,8 +33,8 @@ describe("contract is pinned", () => {
       dashboardSessionClose: 4401,
       maxRosterAgents: 1000,
       maxMachinesListed: 100,
-      maxRoles: 1000,
     });
+    expect("maxRoles" in LIMITS).toBe(false);
     expect(shared.MAX_RAW_FRAME_CHARS).toBe(2 * 1048576 + 4096);
   });
 
@@ -82,7 +82,7 @@ describe("contract is pinned", () => {
     ]);
   });
 
-  it("pins the agent card (roles, status, card, gate)", () => {
+  it("pins the agent card (status, card, gate)", () => {
     expect(shared.AGENT_CARD_MIN_CLIENT).toBe("0.55.0");
     expect(shared.semverGte("0.54.0", shared.AGENT_CARD_MIN_CLIENT)).toBe(
       false,
@@ -103,7 +103,6 @@ describe("contract is pinned", () => {
     expect(shared.CARD_TTL_SEC).toBe(300);
     expect(shared.STATUS_WINDOW_MS).toBe(5000);
     expect(shared.CARDS_PER_MINUTE).toBe(6);
-    expect(R.roles).toBe("/api/v1/roles");
     expect(R.linkedApps).toBe("/api/v1/linked-apps");
     expect(R.link).toBe("/link");
     expect(R.linkConfirm).toBe("/link/confirm");
