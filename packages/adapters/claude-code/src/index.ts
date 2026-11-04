@@ -7,6 +7,13 @@ export {
   SUBAGENT_REFUSAL,
   TURN_META,
 } from "./codex.ts";
+export {
+  builtinSqlite,
+  type CodexNameDeps,
+  codexHome,
+  codexThreadName,
+  DEFAULT_CODEX_NAME,
+} from "./codex-name.ts";
 export { frameOf, type InjectArgs, InjectError, inject } from "./inject.ts";
 export {
   ancestorChain,
