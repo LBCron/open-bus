@@ -1,0 +1,617 @@
+// R393b (#393): the hub side of renames. `rename` answers `renamed` or an
+// error; a former name keeps reaching its agent for LIMITS.formerNameGraceMs,
+// a chosen one stays reserved for it, a default name is minted
+// `<base>-<4 hex>` and never minted again; resolution looks in the sender's
+// own namespace first. `former_names` and a former-name `to_name` go only to
+// daemons at or above RENAME_MIN_CLIENT. Time is Hub.setTestClock, always
+// set ahead of real time and reset after each test.
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import {
+  AGENT_CARD_MIN_CLIENT,
+  type ClientFrame,
+  LIMITS,
+  RENAME_MESSAGES,
+  RENAME_MIN_CLIENT,
+  type ServerFrame,
+} from "@ob/shared";
+import { afterEach, describe, expect, it } from "vitest";
+import { Hub } from "../src/hub/do.js";
+import { hub } from "../src/hub/stub.js";
+import { type Daemon, daemon, e, machine, ns, waitFor } from "./helpers.js";
+
+const stub = () => hub(e) as unknown as DurableObjectStub<Hub>;
+const inHub = <R>(fn: (i: Hub, s: DurableObjectState) => R) =>
+  runInDurableObject(stub(), fn);
+const setClock = (ms: number | null) => inHub((i) => Hub.setTestClock(i, ms));
+
+afterEach(async () => {
+  await setClock(null);
+});
+
+const GRACE = LIMITS.formerNameGraceMs;
+let seq = 0;
+const id = (t: string) => `${t}${++seq}`;
+const uniq = (t: string) => `${t}-${++seq}x${Date.now() % 1e8}`;
+
+type Renamed = Extract<ServerFrame, { type: "renamed" }>;
+type ErrorFrame = Extract<ServerFrame, { type: "error" }>;
+type Receipt = Extract<ServerFrame, { type: "receipt" }>;
+type Roster = Extract<ServerFrame, { type: "roster" }>;
+
+/** A daemon that said hello as `version` (the rename gate by default). */
+async function at(version = RENAME_MIN_CLIENT): Promise<Daemon> {
+  const m = await machine();
+  const d = await daemon(m.token);
+  d.send({
+    v: 1,
+    id: id("h"),
+    type: "hello",
+    machine_label: "MacBook",
+    client_version: version,
+  });
+  await waitFor(d, "hello_ok");
+  return d;
+}
+
+async function reg(
+  d: Daemon,
+  ref: string,
+  name: string,
+  namespace: string,
+  opts: { global?: boolean; kind?: "default" | "chosen" } = {},
+): Promise<string> {
+  d.send({
+    v: 1,
+    id: id("u"),
+    type: "agent_up",
+    agent_ref: ref,
+    kind: "pi",
+    proposed_name: name,
+    namespace,
+    global: opts.global ?? false,
+    ...(opts.kind === undefined ? {} : { name_kind: opts.kind }),
+  });
+  return (await waitFor(d, "agent_ok")).bus_name;
+}
+
+/** Sends `rename`; resolves with the `renamed` or `error` that answers it. */
+async function rename(
+  d: Daemon,
+  ref: string,
+  name: string,
+  kind?: "default" | "chosen",
+): Promise<Renamed | ErrorFrame> {
+  const fid = id("r");
+  d.send({
+    v: 1,
+    id: fid,
+    type: "rename",
+    agent_ref: ref,
+    proposed_name: name,
+    ...(kind === undefined ? {} : { name_kind: kind }),
+  });
+  for (;;) {
+    const f = await d.next();
+    if ((f.type === "renamed" || f.type === "error") && f.id === fid) return f;
+  }
+}
+
+async function renamed(
+  d: Daemon,
+  ref: string,
+  name: string,
+  kind?: "default" | "chosen",
+): Promise<Renamed> {
+  const r = await rename(d, ref, name, kind);
+  expect(r.type, JSON.stringify(r)).toBe("renamed");
+  return r as Renamed;
+}
+
+async function send(
+  d: Daemon,
+  from: string,
+  to: string,
+  toNamespace?: string,
+): Promise<Receipt> {
+  const fid = id("s");
+  d.send({
+    v: 1,
+    id: fid,
+    type: "send",
+    from_ref: from,
+    to_name: to,
+    body: "hi",
+    ...(toNamespace === undefined ? {} : { to_namespace: toNamespace }),
+  } as ClientFrame);
+  for (;;) {
+    const f = await d.next();
+    if (f.type === "receipt" && f.id === fid) return f;
+  }
+}
+
+async function list(d: Daemon, from: string): Promise<Roster> {
+  const fid = id("l");
+  d.send({ v: 1, id: fid, type: "list", from_ref: from });
+  for (;;) {
+    const f = await d.next();
+    if (f.type === "roster" && f.id === fid) return f;
+  }
+}
+
+const row = (r: Roster, name: string) =>
+  r.agents.find((a) => a.bus_name === name);
+
+/** The deliver frame for `msgId`, from frames already received or still to come. */
+async function delivered(d: Daemon, msgId: string) {
+  for (;;) {
+    const f = await d.next();
+    if (f.type === "deliver" && f.msg_id === msgId) return f;
+  }
+}
+
+/** The former names stored for the agent now (or last) named `name`. */
+const formerRows = (name: string) =>
+  inHub((_, s) =>
+    s.storage.sql
+      .exec(
+        "select f.name from former_names f join agents a on a.id = f.agent_id where a.name = ?",
+        name,
+      )
+      .toArray()
+      .map((r) => String(r.name)),
+  );
+
+describe("rename (R393b)", () => {
+  it("A→B: renamed with former; a send to A is delivered to it, with to_name B", async () => {
+    const d = await at();
+    const n = ns("rn");
+    const a = uniq("Alpha");
+    const b = uniq("Bravo");
+    await reg(d, "s", uniq("Sender"), n);
+    await reg(d, "a", a, n);
+    const r = await renamed(d, "a", b);
+    expect(r).toMatchObject({ agent_ref: "a", bus_name: b, former: a });
+
+    const rc = await send(d, "s", a);
+    expect(rc).toMatchObject({ state: "pending", to_name: b });
+    const dl = await delivered(d, rc.msg_id);
+    expect(dl.to_ref).toBe("a");
+    // Any case of the former name resolves.
+    expect(await send(d, "s", a.toUpperCase())).toMatchObject({
+      state: "pending",
+      to_name: b,
+    });
+    // The current name carries no to_name.
+    const cur = await send(d, "s", b);
+    expect(cur.state).toBe("pending");
+    expect(cur.to_name).toBeUndefined();
+
+    const ro = await list(d, "s");
+    expect(row(ro, a)).toBeUndefined();
+    const fn = row(ro, b)?.former_names;
+    expect(fn).toHaveLength(1);
+    expect(fn?.[0]?.name).toBe(a);
+    const exp = Date.parse(fn?.[0]?.expires_at ?? "");
+    expect(exp).toBeGreaterThan(Date.now() + GRACE - 60_000);
+    expect(exp).toBeLessThanOrEqual(Date.now() + GRACE + 1000);
+    d.close();
+  });
+
+  it("a rename keeps status and the socket; others get roster_changed", async () => {
+    const d = await at();
+    const watcher = await at();
+    const n = ns("rn");
+    await reg(d, "a", uniq("Stat"), n);
+    await reg(watcher, "w", uniq("Watch"), n);
+    d.send({
+      v: 1,
+      id: id("st"),
+      type: "status",
+      from_ref: "a",
+      state: "working",
+      label: "busy",
+    });
+    const b = uniq("Stat2");
+    await renamed(d, "a", b);
+    const rc = await waitFor(watcher, "roster_changed");
+    expect(rc.namespace).toBe(n);
+    const ro = await list(d, "a");
+    expect(row(ro, b)).toMatchObject({
+      status: "working",
+      status_label: "busy",
+    });
+    watcher.close();
+    d.close();
+  });
+
+  it("after the grace, A is unknown_agent and the alarm purges the row", async () => {
+    const t0 = Date.now() + 10 * GRACE;
+    await setClock(t0);
+    const d = await at();
+    const n = ns("rn");
+    const a = uniq("Gone");
+    await reg(d, "s", uniq("Sender"), n);
+    await reg(d, "a", a, n);
+    const here = uniq("Here");
+    await renamed(d, "a", here);
+    await setClock(t0 + GRACE - 1);
+    expect((await send(d, "s", a)).state).toBe("pending");
+    await setClock(t0 + GRACE);
+    expect(await send(d, "s", a)).toMatchObject({
+      state: "refused",
+      reason: "unknown_agent",
+    });
+    // No former_names once expired, even before the purge.
+    const ro = await list(d, "s");
+    expect(ro.agents.every((x) => x.former_names === undefined)).toBe(true);
+    await runDurableObjectAlarm(stub());
+    expect(await formerRows(here)).toEqual([]);
+    d.close();
+  });
+
+  it("a chosen former name is reserved for the grace: a new agent asking for it gets A-2", async () => {
+    const t0 = Date.now() + 20 * GRACE;
+    await setClock(t0);
+    const d = await at();
+    const n = ns("rn");
+    const a = uniq("Kept");
+    await reg(d, "a", a, n);
+    await renamed(d, "a", uniq("Moved"));
+    expect(await reg(d, "x", a, n)).toBe(`${a}-2`);
+    // A rename to it is de-collided the same way.
+    await reg(d, "y", uniq("Other"), n);
+    expect((await renamed(d, "y", a)).bus_name).toBe(`${a}-3`);
+    // After the grace the name is free again.
+    await setClock(t0 + GRACE);
+    expect(await reg(d, "z", a, n)).toBe(a);
+    d.close();
+  });
+
+  it("A→B→A is allowed and keeps former names distinct and never the current name", async () => {
+    const d = await at();
+    const n = ns("rn");
+    const a = uniq("Ping");
+    const b = uniq("Pong");
+    await reg(d, "s", uniq("Sender"), n);
+    await reg(d, "a", a, n);
+    await renamed(d, "a", b);
+    expect(await renamed(d, "a", a)).toMatchObject({ bus_name: a, former: b });
+    await renamed(d, "a", b);
+    const fn = row(await list(d, "s"), b)?.former_names;
+    expect(fn?.map((f) => f.name)).toEqual([a]);
+    expect(await formerRows(b)).toEqual([a]);
+    d.close();
+  });
+
+  it("former names are newest first, at most maxFormerNames; older ones still resolve", async () => {
+    const d = await at();
+    const n = ns("rn");
+    await reg(d, "s", uniq("Sender"), n);
+    const names = [uniq("N0")];
+    await reg(d, "a", names[0] as string, n);
+    for (let i = 1; i <= LIMITS.maxFormerNames + 1; i++) {
+      const next = uniq(`N${i}`);
+      names.push(next);
+      await renamed(d, "a", next);
+    }
+    const current = names.at(-1) as string;
+    const fn = row(await list(d, "s"), current)?.former_names ?? [];
+    expect(fn.map((f) => f.name)).toEqual(
+      names.slice(0, -1).reverse().slice(0, LIMITS.maxFormerNames),
+    );
+    for (let i = 1; i < fn.length; i++)
+      expect(Date.parse(fn[i]?.expires_at ?? "")).toBeLessThanOrEqual(
+        Date.parse(fn[i - 1]?.expires_at ?? ""),
+      );
+    // The oldest is past the cap but still resolves and stays reserved.
+    const oldest = names[0] as string;
+    expect(await send(d, "s", oldest)).toMatchObject({
+      state: "pending",
+      to_name: current,
+    });
+    expect(await reg(d, "x", oldest, n)).toBe(`${oldest}-2`);
+    d.close();
+  });
+
+  it("the 11th rename in an hour is rate_limited with the pinned message; no-ops are free", async () => {
+    const t0 = Date.now() + 30 * GRACE;
+    await setClock(t0);
+    const d = await at();
+    const n = ns("rn");
+    let cur = uniq("Rate");
+    await reg(d, "a", cur, n);
+    for (let i = 0; i < LIMITS.renamesPerHour; i++) {
+      // A no-op between every rename never counts.
+      expect(await renamed(d, "a", cur)).not.toHaveProperty("former");
+      cur = uniq(`Rate${i}`);
+      await renamed(d, "a", cur);
+    }
+    const r = await rename(d, "a", uniq("Over"));
+    expect(r).toMatchObject({
+      type: "error",
+      code: "rate_limited",
+      message: RENAME_MESSAGES.rate,
+    });
+    // Still free at the limit.
+    expect(await renamed(d, "a", cur)).toEqual(
+      expect.not.objectContaining({ former: expect.anything() }),
+    );
+    // A rolling hour.
+    await setClock(t0 + GRACE + 1);
+    expect((await renamed(d, "a", uniq("Later"))).former).toBe(cur);
+    d.close();
+  });
+
+  it("a no-op answers renamed without former and records nothing", async () => {
+    const d = await at();
+    const n = ns("rn");
+    const a = uniq("Same");
+    await reg(d, "a", a, n);
+    const r = await renamed(d, "a", `  ${a} `);
+    expect(r).toEqual({
+      v: 1,
+      id: r.id,
+      type: "renamed",
+      agent_ref: "a",
+      bus_name: a,
+    });
+    expect(await formerRows(a)).toEqual([]);
+    d.close();
+  });
+
+  it("a case-only change is a rename, with no former row (same name, any case)", async () => {
+    const d = await at();
+    const n = ns("rn");
+    const a = uniq("Casey");
+    await reg(d, "s", uniq("Sender"), n);
+    await reg(d, "a", a, n);
+    const r = await renamed(d, "a", a.toLowerCase());
+    expect(r).toMatchObject({ bus_name: a.toLowerCase(), former: a });
+    expect(await formerRows(a.toLowerCase())).toEqual([]);
+    const rc = await send(d, "s", a);
+    expect(rc.state).toBe("pending");
+    expect(rc.to_name).toBeUndefined();
+    d.close();
+  });
+
+  it("close drops former names: the name is free at once (agent_down, sessions, revoke)", async () => {
+    const d = await at();
+    const n = ns("rn");
+    await reg(d, "s", uniq("Sender"), n);
+    const a = uniq("Closer");
+    await reg(d, "a", a, n);
+    const a2 = uniq("Closer2");
+    await renamed(d, "a", a2);
+    expect(await formerRows(a2)).toEqual([a]);
+    d.send({ v: 1, id: id("d"), type: "agent_down", agent_ref: "a" });
+    expect(await reg(d, "x", a, n)).toBe(a);
+    expect(await formerRows(a2)).toEqual([]);
+
+    const b = uniq("Sess");
+    await reg(d, "b", b, n);
+    const b2 = uniq("Sess2");
+    await renamed(d, "b", b2);
+    d.send({ v: 1, id: id("c"), type: "sessions", open: [], closed: ["b"] });
+    expect(await reg(d, "y", b, n)).toBe(b);
+    expect(await formerRows(b2)).toEqual([]);
+
+    const m = await machine();
+    const v = await daemon(m.token);
+    v.send({
+      v: 1,
+      id: id("h"),
+      type: "hello",
+      machine_label: "M",
+      client_version: RENAME_MIN_CLIENT,
+    });
+    await waitFor(v, "hello_ok");
+    const c = uniq("Revoked");
+    await reg(v, "rv", c, n);
+    const c2 = uniq("Revoked2");
+    await renamed(v, "rv", c2);
+    expect(await hub(e).revokeMachine(m.id)).toBe(true);
+    expect(await reg(d, "z", c, n)).toBe(c);
+    expect(await formerRows(c2)).toEqual([]);
+    d.close();
+  });
+
+  it("rename from a non-live agent is not_registered", async () => {
+    const d = await at();
+    const n = ns("rn");
+    expect(await rename(d, "nobody", "X")).toMatchObject({
+      type: "error",
+      code: "not_registered",
+    });
+    await reg(d, "a", uniq("Closed"), n);
+    d.send({ v: 1, id: id("d"), type: "agent_down", agent_ref: "a" });
+    expect(await rename(d, "a", "X")).toMatchObject({
+      type: "error",
+      code: "not_registered",
+    });
+    // The socket stays usable.
+    await reg(d, "b", uniq("After"), n);
+    d.close();
+  });
+
+  it("a namespace-hidden former name is unknown_agent; a global's follows its visibility", async () => {
+    const d = await at();
+    const n1 = ns("rn");
+    const n2 = ns("rn");
+    const a = uniq("Hidden");
+    const g = uniq("GlobalOld");
+    await reg(d, "a", a, n1);
+    await reg(d, "g", g, n1, { global: true });
+    await reg(d, "s", uniq("Outsider"), n2);
+    await renamed(d, "a", uniq("Hidden2"));
+    const gNew = uniq("GlobalNew");
+    await renamed(d, "g", gNew);
+    expect(await send(d, "s", a)).toMatchObject({
+      state: "refused",
+      reason: "unknown_agent",
+    });
+    expect(await send(d, "s", a, n1)).toMatchObject({
+      state: "refused",
+      reason: "other_namespace",
+    });
+    // A global's former name is visible wherever its current name is.
+    expect(await send(d, "s", g)).toMatchObject({
+      state: "pending",
+      to_name: gNew,
+    });
+    expect(await send(d, "s", g, n1)).toMatchObject({
+      state: "pending",
+      to_name: gNew,
+    });
+    // ...and reserved globally.
+    expect(await reg(d, "x", g, n2)).toBe(`${g}-2`);
+    d.close();
+  });
+
+  it("the sender's own namespace comes first: its former name beats a live name elsewhere", async () => {
+    const d = await at();
+    const n1 = ns("rn");
+    const n2 = ns("rn");
+    const shared = uniq("Shared");
+    const moved = uniq("Moved");
+    await reg(d, "g", uniq("Global"), n1, { global: true });
+    await reg(d, "l", uniq("Local"), n1);
+    await reg(d, "own", shared, n1);
+    await renamed(d, "own", moved);
+    // Not reserved in another namespace: a non-global there may take it.
+    expect(await reg(d, "far", shared, n2)).toBe(shared);
+    for (const from of ["g", "l"])
+      expect(await send(d, from, shared)).toMatchObject({
+        state: "pending",
+        to_name: moved,
+      });
+    // The global sender reaches the other one only by naming its namespace.
+    const there = await send(d, "g", shared, n2);
+    expect(there.state).toBe("pending");
+    expect(there.to_name).toBeUndefined();
+    d.close();
+  });
+
+  it("a daemon below the gate gets no former_names and no to_name, and resolves the same", async () => {
+    const d = await at();
+    for (const version of [AGENT_CARD_MIN_CLIENT, "0.64.0"]) {
+      const old = await at(version);
+      const n = ns("rn");
+      const a = uniq("Old");
+      const b = uniq("New");
+      await reg(old, "s", uniq("Sender"), n);
+      await reg(d, "a", a, n);
+      await renamed(d, "a", b);
+      const rc = await send(old, "s", a);
+      expect(rc.state).toBe("pending");
+      expect(rc).not.toHaveProperty("to_name");
+      // No to_name either for a plain send (#394 removed the role case).
+      expect(await send(old, "s", b)).not.toHaveProperty("to_name");
+      const ro = await list(old, "s");
+      expect(row(ro, b)).toBeDefined();
+      expect(ro.agents.every((x) => !("former_names" in x))).toBe(true);
+      expect(old.raw.join("")).not.toContain("former_names");
+      old.close();
+      d.send({ v: 1, id: id("d"), type: "agent_down", agent_ref: "a" });
+    }
+    d.close();
+  });
+
+  it("a resend of a send through a former name repeats its to_name", async () => {
+    const d = await at();
+    const n = ns("rn");
+    const a = uniq("Re");
+    const b = uniq("Re2");
+    await reg(d, "s", uniq("Sender"), n);
+    await reg(d, "a", a, n);
+    await renamed(d, "a", b);
+    const f = {
+      v: 1,
+      id: id("s"),
+      type: "send",
+      from_ref: "s",
+      to_name: a,
+      body: "hi",
+    } as ClientFrame;
+    d.send(f);
+    const first = await waitFor(d, "receipt");
+    d.send(f);
+    const again = await waitFor(d, "receipt");
+    expect(again).toMatchObject({ msg_id: first.msg_id, to_name: b });
+    d.close();
+  });
+});
+
+describe("default names (R393b)", () => {
+  const HEX4 = /-[0-9a-f]{4}$/;
+
+  it("are minted <base>-<4 hex>, never minted again, and kept by their agent", async () => {
+    const d = await at();
+    const n = ns("rn");
+    const base = uniq("pidef");
+    const one = await reg(d, "p1", base, n, { kind: "default" });
+    expect(one).toMatch(HEX4);
+    expect(one.slice(0, -5)).toBe(base);
+    const two = await reg(d, "p2", base, n, { kind: "default" });
+    expect(two).toMatch(HEX4);
+    expect(two).not.toBe(one);
+    // A re-sent agent_up (reconnect) and a reopen keep the agent's own.
+    expect(await reg(d, "p1", base, n, { kind: "default" })).toBe(one);
+    d.send({ v: 1, id: id("d"), type: "agent_down", agent_ref: "p1" });
+    const three = await reg(d, "p3", base, n, { kind: "default" });
+    expect(three).not.toBe(one);
+    expect(await reg(d, "p1", base, n, { kind: "default" })).toBe(one);
+    // A default rename back to the base is a no-op.
+    expect(await renamed(d, "p1", base, "default")).not.toHaveProperty(
+      "former",
+    );
+    // Absent name_kind is chosen: no suffix.
+    const chosen = uniq("pichosen");
+    expect(await reg(d, "c", chosen, n)).toBe(chosen);
+    d.close();
+  });
+
+  it("a long base keeps the suffix within the name cap", async () => {
+    const d = await at();
+    const base = `x${"y".repeat(70)}`;
+    const name = await reg(d, "long", base, ns("rn"), { kind: "default" });
+    expect(name.length).toBeLessThanOrEqual(LIMITS.maxBusNameChars);
+    expect(name).toMatch(HEX4);
+    d.close();
+  });
+
+  it("a former default name resolves for the grace but is not reserved", async () => {
+    const d = await at();
+    const n = ns("rn");
+    await reg(d, "s", uniq("Sender"), n);
+    const minted = await reg(d, "p", uniq("pi"), n, { kind: "default" });
+    const chosen = uniq("Picked");
+    expect(await renamed(d, "p", chosen, "chosen")).toMatchObject({
+      bus_name: chosen,
+      former: minted,
+    });
+    expect(await send(d, "s", minted)).toMatchObject({
+      state: "pending",
+      to_name: chosen,
+    });
+    // Not reserved: a chosen name may take it, and the live one then wins.
+    expect(await reg(d, "x", minted, n)).toBe(minted);
+    const rc = await send(d, "s", minted);
+    expect(rc.state).toBe("pending");
+    expect(rc.to_name).toBeUndefined();
+    await delivered(d, rc.msg_id).then((f) => expect(f.to_ref).toBe("x"));
+    d.close();
+  });
+
+  it("a default rename mints a name too", async () => {
+    const d = await at();
+    const n = ns("rn");
+    const a = uniq("Named");
+    await reg(d, "p", a, n);
+    const base = uniq("codex");
+    const r = await renamed(d, "p", base, "default");
+    expect(r.bus_name).toMatch(HEX4);
+    expect(r.bus_name.slice(0, -5)).toBe(base);
+    expect(r.former).toBe(a);
+    d.close();
+  });
+});
