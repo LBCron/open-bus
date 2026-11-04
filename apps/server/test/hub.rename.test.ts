@@ -681,6 +681,51 @@ describe("review fixes (R393b)", () => {
     expect(await log()).toBe(0);
     d.close();
   });
+
+  it("at the limit, a re-sent name the agent holds as foo-2 is a no-op", async () => {
+    const t0 = Date.now() + 40 * GRACE;
+    await setClock(t0);
+    const d = await at();
+    const n = ns("rn");
+    const foo = uniq("Foo");
+    await reg(d, "o", foo, n);
+    await reg(d, "a", uniq("Fa"), n);
+    for (let i = 0; i < LIMITS.renamesPerHour - 1; i++)
+      await renamed(d, "a", uniq(`Fa${i}`));
+    expect((await renamed(d, "a", foo)).bus_name).toBe(`${foo}-2`);
+    const again = await renamed(d, "a", foo);
+    expect(again.bus_name).toBe(`${foo}-2`);
+    expect(again).not.toHaveProperty("former");
+    expect(await rename(d, "a", uniq("Over"))).toMatchObject({
+      code: "rate_limited",
+    });
+    d.close();
+  });
+
+  it("at the limit, a default rename to a different minted name is rate_limited", async () => {
+    const t0 = Date.now() + 50 * GRACE;
+    await setClock(t0);
+    const d = await at();
+    const n = ns("rn");
+    const base = uniq("pibase");
+    const m1 = await reg(d, "x", base, n, { kind: "default" });
+    d.send({ v: 1, id: id("d"), type: "agent_down", agent_ref: "x" });
+    // Z holds m1 (unreserved: X is closed), so X's reopen mints m2.
+    expect(await reg(d, "z", m1, n)).toBe(m1);
+    const m2 = await reg(d, "x", base, n, { kind: "default" });
+    expect(m2).not.toBe(m1);
+    d.send({ v: 1, id: id("d"), type: "agent_down", agent_ref: "z" });
+    for (let i = 0; i < LIMITS.renamesPerHour - 1; i++)
+      await renamed(d, "x", uniq(`Fx${i}`));
+    // X now holds m1 (chosen; Z closed). A default rename would mint m2 back.
+    expect((await renamed(d, "x", m1)).bus_name).toBe(m1);
+    expect(await rename(d, "x", base, "default")).toMatchObject({
+      type: "error",
+      code: "rate_limited",
+      message: RENAME_MESSAGES.rate,
+    });
+    d.close();
+  });
 });
 
 describe("default names (R393b)", () => {

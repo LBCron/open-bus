@@ -718,31 +718,6 @@ function dropNameState(
     );
 }
 
-/**
- * R393b: whether a rename would keep the agent's current name, without
- * assigning one (the rate-limit path): a chosen name equal to it exactly, or
- * a default whose base the current name was minted from for this agent.
- */
-function isNoopRename(
-  sql: SqlStorage,
-  agent: AgentRow,
-  proposed: string,
-  kind: NameKind | undefined,
-): boolean {
-  if (kind !== "default") return candidateName(proposed) === agent.name;
-  return (
-    one(
-      sql,
-      "select 1 as x from minted_names where org_id = ? and lname = ? and agent_id = ? and lbase = ? and name = ?",
-      OWNER_ORG_ID,
-      agent.name.toLowerCase(),
-      agent.id,
-      candidateName(proposed).toLowerCase(),
-      agent.name,
-    ) !== null
-  );
-}
-
 /** Whose name it is (#393): absent means chosen. */
 type NameKind = "default" | "chosen";
 
@@ -2812,27 +2787,6 @@ export class Hub extends DurableObject<Env> {
     const now = this.#now();
     purgeFormerNames(sql, now);
     const global = agent.global === 1;
-    // The rate limit first, so a refused rename assigns nothing. At the limit
-    // a no-op still answers renamed (it never counts).
-    sql.exec(
-      "delete from rename_rl where agent_id = ? and at <= ?",
-      agent.id,
-      now - HOUR_MS,
-    );
-    const count =
-      one<{ n: number }>(
-        sql,
-        "select count(*) as n from rename_rl where agent_id = ?",
-        agent.id,
-      )?.n ?? 0;
-    if (
-      count >= LIMITS.renamesPerHour &&
-      !isNoopRename(sql, agent, f.proposed_name, f.name_kind)
-    ) {
-      logEvent("rate_limited", { kind: "rename", machineId: agent.machineId });
-      sendError(ws, f.id, "rate_limited", RENAME_MESSAGES.rate);
-      return;
-    }
     const assigned = assignName(
       sql,
       agent.namespace,
@@ -2852,6 +2806,24 @@ export class Hub extends DurableObject<Env> {
     } as const;
     if (name === agent.name) {
       sendFrame(ws, reply);
+      return;
+    }
+    // The exact no-op check (assignName writes nothing), then the rate
+    // limit, then the commit: a no-op never counts, a refusal changes nothing.
+    sql.exec(
+      "delete from rename_rl where agent_id = ? and at <= ?",
+      agent.id,
+      now - HOUR_MS,
+    );
+    const count =
+      one<{ n: number }>(
+        sql,
+        "select count(*) as n from rename_rl where agent_id = ?",
+        agent.id,
+      )?.n ?? 0;
+    if (count >= LIMITS.renamesPerHour) {
+      logEvent("rate_limited", { kind: "rename", machineId: agent.machineId });
+      sendError(ws, f.id, "rate_limited", RENAME_MESSAGES.rate);
       return;
     }
     sql.exec(
