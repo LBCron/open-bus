@@ -158,12 +158,11 @@ const quoted = (head: string, quote: string, tail: string): string => {
  */
 function receiptText(
   r: { state: string; reason?: string },
-  sentTo: string,
+  to: string,
   namespaces?: number,
   excerpt?: string,
 ): string {
   const quote = excerpt ? `"${excerpt}"` : undefined;
-  const to = sentTo;
   switch (r.state) {
     case "pending":
       return fitLine(

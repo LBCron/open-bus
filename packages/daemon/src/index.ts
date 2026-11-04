@@ -637,7 +637,12 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
     sessions,
     log,
     ...deps.hub,
-    onFrame: (frame) => {
+    onFrame: (raw) => {
+      // An old hub's `role_vacant` (roles are gone) reads as an unknown name, for every client.
+      const frame =
+        raw.type === "receipt" && raw.reason === "role_vacant"
+          ? { ...raw, reason: "unknown_agent" as const }
+          : raw;
       switch (frame.type) {
         case "deliver":
           void delivery.deliver(frame);

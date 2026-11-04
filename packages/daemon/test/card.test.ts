@@ -460,7 +460,7 @@ const helloOf = (agent_ref: string, marker?: string) => ({
 });
 
 /** A hub that answers list with a status (and a `role`, as an old hub sends it) and a send with a refusal. */
-async function cardHub() {
+async function cardHub(reason = "ambiguous") {
   const h = await daemonHarness({ version: GATE });
   h.hubSock()?.on("message", (d) => {
     const f = JSON.parse(String(d));
@@ -488,7 +488,7 @@ async function cardHub() {
         type: "receipt",
         msg_id: "mmmmmmmmmmmmmmm1",
         state: "refused",
-        reason: "ambiguous",
+        reason,
       });
   });
   return h;
@@ -522,6 +522,21 @@ describe("roster status (AC5a)", () => {
       reason: "ambiguous",
     });
     expect(byType(frames, "agent")).toMatchObject({ daemon_version: GATE });
+  });
+
+  it("an old hub's role_vacant reaches every client as unknown_agent", async () => {
+    for (const marker of [GATE, "0.53.0", undefined]) {
+      const h = await cardHub("role_vacant");
+      const frames = await talk(
+        h.socketPath,
+        [helloOf("ses_rv", marker), asks[1]],
+        2,
+      );
+      expect(byType(frames, "receipt")).toMatchObject({
+        state: "refused",
+        reason: "unknown_agent",
+      });
+    }
   });
 
   /** An old adapter decodes every reply, and sees none of the card fields. */
