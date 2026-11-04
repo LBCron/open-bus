@@ -86,6 +86,28 @@ let hub: string;
 let env: NodeJS.ProcessEnv;
 const peers: Peer[] = [];
 
+/**
+ * A Codex thread proposes no name of its own here, so the hub mints its
+ * default (#393): `codex-<4 hex>`. The suffix is random: tests learn the
+ * name at runtime and only ever assert this shape.
+ */
+const MINTED_CODEX = /^codex-[0-9a-f]{4}$/;
+
+/** The live Codex agent in `namespace` on `roster`, whose name is minted. */
+function codexIn(roster: unknown, namespace: string): string {
+  const agents =
+    roster && typeof roster === "object" && "agents" in roster
+      ? (roster.agents as { name: string; kind: string; namespace: string }[])
+      : [];
+  const row = agents.filter(
+    (a) => a.kind === "codex" && a.namespace === namespace,
+  );
+  expect(row, `one codex row in ${namespace}`).toHaveLength(1);
+  const name = row[0]?.name ?? "";
+  expect(name).toMatch(MINTED_CODEX);
+  return name;
+}
+
 let failed = false;
 /** Every process's log tail and what the fake models saw; the temp root is kept. */
 function dump(why: string): void {
@@ -243,6 +265,8 @@ describe("codex exec", () => {
   let thread: string;
   let p: Peer;
   let ws: string;
+  /** The Codex thread's bus name, minted by the hub. */
+  let name: string;
 
   it("joins as codex, is attested, lists agents and delivers to the peer", async () => {
     ws = codexWorkspace("cx-exec");
@@ -270,17 +294,18 @@ describe("codex exec", () => {
     expect(thread).not.toBe("");
     // list_agents went through the daemon and the hub: the roster has both.
     expect(outputOf(thread, "list_agents")).toMatch(/^- peer \(pi, cx-exec,/m);
+    name = codexIn(during, "cx-exec");
     expect(during).toMatchObject({
       type: "roster",
       agents: expect.arrayContaining([
-        expect.objectContaining({ name: "codex", kind: "codex", live: true }),
+        expect.objectContaining({ name, kind: "codex", live: true }),
       ]),
     });
     // send_message: attested (a refused thread gets "did not accept"), then Delivered.
     expect(outputOf(thread, "send_message")).toMatch(/Delivered to peer/);
     expect(p.delivered).toEqual([
       expect.objectContaining({
-        from_name: "codex",
+        from_name: name,
         namespace: "cx-exec",
         body: "hello from exec",
       }),
@@ -291,7 +316,7 @@ describe("codex exec", () => {
     const before = onThread(thread).length;
     const r = await p.client.request({
       type: "send",
-      to: "codex",
+      to: name,
       body: "after exit",
     });
     // The thread closed with its process: the hub expires mail to it.
@@ -353,9 +378,13 @@ describe("codex exec in code mode (C27)", () => {
     expect(outs).toHaveLength(3);
     expect(outs[0]).toMatch(/- peer \(pi, cx-code,/);
     expect(outs[1]).toMatch(/Delivered to peer/);
+    // The admitted `self` names the thread: the name the peer must see.
+    // Code mode may hand the JSON back escaped: allow `\"name\": \"…\"`.
+    const name = /"name\\*"\s*:\s*\\*"([^"\\]+)/.exec(outs[2] ?? "")?.[1] ?? "";
+    expect(name).toMatch(MINTED_CODEX);
     expect(p.delivered).toEqual([
       expect.objectContaining({
-        from_name: "codex",
+        from_name: name,
         namespace: "cx-code",
         body: "hello from code mode",
       }),
@@ -373,6 +402,8 @@ describe("codex app-server (the desktop app's mode)", () => {
   let thread: string;
   let p: Peer;
   let ws: string;
+  /** The Codex thread's bus name, minted by the hub at its first call. */
+  let name: string;
 
   setUp(async () => {
     ws = codexWorkspace("cx-app");
@@ -407,15 +438,17 @@ describe("codex app-server (the desktop app's mode)", () => {
     });
     await app.next((n) => n.method === "turn/completed", from);
     expect(outputOf(thread, "list_agents")).toMatch(/^- peer \(pi, cx-app,/m);
-    expect(await p.client.request({ type: "list" })).toMatchObject({
+    const roster = await p.client.request({ type: "list" });
+    name = codexIn(roster, "cx-app");
+    expect(roster).toMatchObject({
       type: "roster",
       agents: expect.arrayContaining([
-        expect.objectContaining({ name: "codex", kind: "codex", live: true }),
+        expect.objectContaining({ name, kind: "codex", live: true }),
       ]),
     });
     expect(outputOf(thread, "send_message")).toMatch(/Delivered to peer/);
     expect(p.delivered).toEqual([
-      expect.objectContaining({ from_name: "codex", body: "hello from app" }),
+      expect.objectContaining({ from_name: name, body: "hello from app" }),
     ]);
   });
 
@@ -423,7 +456,7 @@ describe("codex app-server (the desktop app's mode)", () => {
     const from = app.notes.length;
     const r = await p.client.request({
       type: "send",
-      to: "codex",
+      to: name,
       body: "wake up, codex",
     });
     expect(r).toMatchObject({ type: "receipt", state: "delivered" });
@@ -448,7 +481,7 @@ describe("codex app-server (the desktop app's mode)", () => {
     const replies = p.delivered.length;
     const r = await p.client.request({
       type: "send",
-      to: "codex",
+      to: name,
       body: "ob-e2e send peer pong",
     });
     expect(r).toMatchObject({ type: "receipt", state: "delivered" });
@@ -465,7 +498,7 @@ describe("codex app-server (the desktop app's mode)", () => {
       /Delivered to peer/,
     );
     expect(p.delivered.slice(replies)).toEqual([
-      expect.objectContaining({ from_name: "codex", body: "pong" }),
+      expect.objectContaining({ from_name: name, body: "pong" }),
     ]);
   });
 
@@ -604,6 +637,8 @@ describe("agent card (AC5d)", () => {
   let owner: Owner;
   let anthropic: FakeAnthropic;
   let codexId: string;
+  /** The Codex thread's bus name, minted by the hub at its first call. */
+  let codexName: string;
   /** Whether the hub signs cards (AC4b); probed by the not_linked case. */
   let signs = false;
 
@@ -683,13 +718,14 @@ describe("agent card (AC5d)", () => {
       expect(out).toBe(statusSetText("working", "writing tests"));
       // An outer bound only: the hub's tests own the 2 s timing.
       const row = await restRow("codex", (a) => a.status === "working", 10_000);
+      expect(row.name).toMatch(MINTED_CODEX);
       expect(row).toMatchObject({
-        name: "codex",
         status: "working",
         statusLabel: "writing tests",
       });
       codexId = row.id;
-      expect(await rosterRow(p, "codex")).toMatchObject({
+      codexName = row.name;
+      expect(await rosterRow(p, codexName)).toMatchObject({
         status: "working",
         status_label: "writing tests",
       });
@@ -728,7 +764,10 @@ describe("agent card (AC5d)", () => {
             ?.output,
         ).toBe(statusSetText("blocked"));
         expect(claudeList.output).toMatch(
-          /^- codex \(codex, cx-card[^)]*\) {2}agent says: working · "writing tests"$/m,
+          new RegExp(
+            `^- ${codexName} \\(codex, cx-card[^)]*\\) {2}agent says: working · "writing tests"$`,
+            "m",
+          ),
         );
         const row = await restRow("claude-code", (a) => a.status === "blocked");
         expect(row.statusLabel).toBeUndefined();
@@ -811,7 +850,7 @@ describe("agent card (AC5d)", () => {
       expect(outs).toEqual(steps.map((l) => statusSetText("working", l)));
       // An outer bound only: the hub's tests own the 7 s timing.
       await restRow("codex", (a) => a.statusLabel === "step 5", 15_000);
-      expect(await rosterRow(p, "codex")).toMatchObject({
+      expect(await rosterRow(p, codexName)).toMatchObject({
         status_label: "step 5",
       });
     });
@@ -858,7 +897,7 @@ describe("agent card (AC5d)", () => {
         aud: AUD,
         sub: codexId,
         nonce: nonce(2),
-        name: "codex",
+        name: codexName,
         kind: "codex",
       });
       const now = Date.now() / 1000;
@@ -869,10 +908,10 @@ describe("agent card (AC5d)", () => {
 
   describe("below the gate", () => {
     it("an adapter below the gate sees none of the new fields", async () => {
-      expect(await rosterRow(p, "codex")).toMatchObject({
+      expect(await rosterRow(p, codexName)).toMatchObject({
         status: "working",
       });
-      const row = await rosterRow(old, "codex");
+      const row = await rosterRow(old, codexName);
       expect(row).toBeDefined();
       for (const k of ["status", "status_label", "status_at"])
         expect(row).not.toHaveProperty(k);
