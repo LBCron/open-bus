@@ -178,9 +178,11 @@ create index if not exists card_rl_at on card_rl(at);
 -- R393b (#393): names an agent left by a rename, which still reach it until
 -- expires_at (LIMITS.formerNameGraceMs). kind is the left name's kind:
 -- 'chosen' rows are reserved (nameTaken) while live, 'default' rows only
--- resolve. An agent's rows go when it closes or is revoked; expired rows are
--- purged on read and by the alarm. Never equal (case-insensitively) to the
--- agent's current name, and distinct per agent (lname).
+-- resolve (their minted_names row keeps the name from anyone else). An
+-- agent's rows go when it closes or is revoked; expired rows are purged on
+-- read and by the alarm. Never equal (case-insensitively) to the agent's
+-- current name, distinct per agent (lname), at most LIMITS.maxFormerNames
+-- per agent (#446: an older one is dropped).
 create table if not exists former_names (
   agent_id text not null,
   org_id text not null,
@@ -194,8 +196,8 @@ create index if not exists former_names_agent on former_names(agent_id, expires_
 create index if not exists former_names_due on former_names(expires_at);
 
 -- R393b: every name minted for a default name_kind (<base>-<4 hex>). Kept
--- for good: a minted name is never minted again, for any agent; its own
--- agent gets it back for the same base while no one else holds it.
+-- for good: a minted name is never minted again, and never assigned to any
+-- other agent (nameTaken, #446); its own agent gets it back.
 create table if not exists minted_names (
   org_id text not null,
   lname text not null,
@@ -208,7 +210,9 @@ create table if not exists minted_names (
 create index if not exists minted_names_agent on minted_names(agent_id, lbase, created_at);
 
 -- R393b: the rename rate limit, a sliding log like card_rl: one row per
--- name change (no-ops excluded), LIMITS.renamesPerHour per agent per hour.
+-- name change (no-ops excluded; a live agent_up's included), at most
+-- LIMITS.renamesPerHour per agent per hour. Kept through a close (#446),
+-- dropped on a revoke, purged by the alarm.
 create table if not exists rename_rl (
   agent_id text not null,
   at integer not null
