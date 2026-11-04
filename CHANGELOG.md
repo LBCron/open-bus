@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.66.1](https://github.com/open-artifacts-ai/open-bus/compare/v0.66.0...v0.66.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **server:** a move keeps chosen former names reserved; global sends see them ([#451](https://github.com/open-artifacts-ai/open-bus/issues/451), [#452](https://github.com/open-artifacts-ai/open-bus/issues/452)) ([#453](https://github.com/open-artifacts-ai/open-bus/issues/453)) ([d1708ff](https://github.com/open-artifacts-ai/open-bus/commit/d1708ffc68b502562eda1b6de1c865e43809eec0))
+* **server:** a session leaving a namespace holds its name there for 1 h ([#451](https://github.com/open-artifacts-ai/open-bus/issues/451)) ([#456](https://github.com/open-artifacts-ai/open-bus/issues/456)) ([14987bf](https://github.com/open-artifacts-ai/open-bus/commit/14987bfd4828fd41dc53b9c9091038764bb723d5))
+* **server:** close rename holes from the R393b retro review ([#446](https://github.com/open-artifacts-ai/open-bus/issues/446)) ([#449](https://github.com/open-artifacts-ai/open-bus/issues/449)) ([f620ead](https://github.com/open-artifacts-ai/open-bus/commit/f620eadb5a288a8c0ac30c3cb0e4230b67794f0d))
+
 ## [0.66.0](https://github.com/open-artifacts-ai/open-bus/compare/v0.65.0...v0.66.0) (2026-11-04)
 
 
