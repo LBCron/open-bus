@@ -10,7 +10,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentRecord } from "../src/agents.ts";
 import { cachedProcStart } from "../src/liveness/claude.ts";
-import { lstartEpoch, openSessions } from "../src/presence/opencode.ts";
+import {
+  lstartEpoch,
+  openSessions,
+  openSessionTitles,
+} from "../src/presence/opencode.ts";
 import {
   execSpawn,
   OpenCodeTransport,
@@ -602,5 +606,47 @@ describe("opencode liveness sync", () => {
     presence(dir, 4321, ["ses_root"]);
     await h.next("agent_up", 2);
     expect(h.daemon.agents.byRef("ses_root")?.live).toBe(true);
+  });
+});
+
+describe("OpenCode root session titles (#393)", () => {
+  const deps = () => ({ isRunning: () => true, procStartEpoch: () => null });
+  const dated = (dir: string, pid: number, data: object) => {
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `${pid}.json`);
+    writeFileSync(file, JSON.stringify({ pid, ...data }));
+    return file;
+  };
+
+  it("reads a title keyed by its root session, and the `root` short form", () => {
+    const d = presenceDir();
+    dated(d, 4242, {
+      sessionIDs: ["ses_a", "ses_b"],
+      titles: { ses_a: "Fix the flaky test", root: "Refactor the daemon" },
+    });
+    expect([...openSessionTitles(d, deps())]).toEqual([
+      ["ses_a", "Fix the flaky test"],
+      // `root` names the newest root the file lists.
+      ["ses_b", "Refactor the daemon"],
+    ]);
+  });
+
+  it("reads nothing from a file without titles, or from a dead TUI", () => {
+    const d = presenceDir();
+    dated(d, 4242, { sessionIDs: ["ses_a"] });
+    expect(openSessionTitles(d, deps()).size).toBe(0);
+    dated(d, 4343, { sessionIDs: ["ses_b"], titles: { ses_b: "gone" } });
+    expect(
+      openSessionTitles(d, {
+        isRunning: () => false,
+        procStartEpoch: () => null,
+      }).size,
+    ).toBe(0);
+  });
+
+  it("ignores a title for a session the file does not list", () => {
+    const d = presenceDir();
+    dated(d, 4242, { sessionIDs: ["ses_a"], titles: { ses_other: "nope" } });
+    expect(openSessionTitles(d, deps()).size).toBe(0);
   });
 });
