@@ -12,6 +12,7 @@ import {
 } from "./protocol.js";
 import {
   FormerNamesSchema,
+  NAME_KINDS,
   RENAME_MESSAGES,
   RENAME_MIN_CLIENT,
 } from "./rename.js";
@@ -261,5 +262,51 @@ describe("decoder bounds for former_names (R393a)", () => {
     // A rename never nests; a depth-5 client frame is refused before parse.
     const deep = `{"v":1,"id":"${id}","type":"ack","x":[[[[]]]]}`;
     expect(decodeClientFrame(deep)).toEqual({ ok: false, error: "bad_frame" });
+  });
+});
+
+describe("name_kind on agent_up and rename (#393 amendment 1)", () => {
+  const up = {
+    v: 1,
+    id,
+    type: "agent_up",
+    agent_ref: "s1",
+    kind: "pi",
+    proposed_name: "pi",
+    namespace: "ns",
+    global: false,
+  };
+  const ren = {
+    v: 1,
+    id,
+    type: "rename",
+    agent_ref: "s1",
+    proposed_name: "OpenBus Backend",
+  };
+
+  it("pins the two kinds", () => {
+    expect(NAME_KINDS).toEqual(["default", "chosen"]);
+  });
+
+  it("is optional on both, and each kind round-trips", () => {
+    for (const f of [up, ren]) {
+      expect(decodeClientFrame(JSON.stringify(f)).ok).toBe(true);
+      for (const name_kind of NAME_KINDS) {
+        const g = { ...f, name_kind };
+        expect(decodeClientFrame(encodeFrame(g as never))).toEqual({
+          ok: true,
+          frame: g,
+        });
+      }
+    }
+  });
+
+  it("rejects any other value", () => {
+    for (const f of [up, ren])
+      for (const name_kind of ["Default", "", "user", 1, null])
+        expect(
+          decodeClientFrame(JSON.stringify({ ...f, name_kind })).ok,
+          String(name_kind),
+        ).toBe(false);
   });
 });

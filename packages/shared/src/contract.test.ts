@@ -170,6 +170,7 @@ describe("CONTRACT.md", () => {
       "RENAME_MIN_CLIENT",
       "0.64.0",
       "former_names",
+      "name_kind",
       "Too many renames",
       "ob-card+jwt",
       "ob-link+jwt",

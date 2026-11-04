@@ -18,7 +18,7 @@ import {
   receiptShape,
 } from "./receipts.js";
 import { AgentRefSchema, MachineLabelSchema } from "./refs.js";
-import { FormerNamesSchema } from "./rename.js";
+import { FormerNamesSchema, NameKindSchema } from "./rename.js";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -73,6 +73,8 @@ const AgentUp = z.strictObject({
   proposed_name: WellFormedText.pipe(z.string().max(256)),
   namespace: WireNamespaceSchema,
   global: z.boolean(),
+  /** Whose name `proposed_name` is (#393). Absent means `chosen`. Sent only to hubs at or above RENAME_MIN_CLIENT: older hubs refuse the unknown key. */
+  name_kind: NameKindSchema.optional(),
 });
 
 const AgentDown = z.strictObject({
@@ -174,6 +176,8 @@ const Rename = z.strictObject({
   type: z.literal("rename"),
   agent_ref: AgentRefSchema,
   proposed_name: WellFormedText.pipe(z.string().min(1).max(256)),
+  /** Whose name it is: a tool rename is `chosen`; a harness reverting to its fallback is `default`. Absent means `chosen`. */
+  name_kind: NameKindSchema.optional(),
 });
 
 /** Answered by `card` or `card_refused` (or `error`). */

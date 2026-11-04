@@ -39,7 +39,7 @@ One JSON object per WebSocket text message. Every frame is a strict object `{v: 
 ### Client to hub (`CLIENT_FRAMES`)
 
 - `hello {machine_label, client_version}`; `client_version` 1..64 chars
-- `agent_up {agent_ref, kind, proposed_name, namespace, global}`; `kind` is `claude-code | opencode | pi | omp | codex`; kinds beyond the original three are version-gated on the hub → daemon side (see `roster` and Version-gating); a hub that refuses any of them (one older than the kind answers `error bad_frame`) gets that agent's `agent_up` again as `pi`, the daemon logging once per kind (C23b, C26a); `proposed_name` <= 256 chars (any string; the hub names the agent via `candidateName`)
+- `agent_up {agent_ref, kind, proposed_name, namespace, global, name_kind?}`; `name_kind` (`default | chosen`, see Renames) only to hubs at or above `RENAME_MIN_CLIENT`; `kind` is `claude-code | opencode | pi | omp | codex`; kinds beyond the original three are version-gated on the hub → daemon side (see `roster` and Version-gating); a hub that refuses any of them (one older than the kind answers `error bad_frame`) gets that agent's `agent_up` again as `pi`, the daemon logging once per kind (C23b, C26a); `proposed_name` <= 256 chars (any string; the hub names the agent via `candidateName`)
 - `agent_down {agent_ref}`
 - `sessions {open[], closed[]}` of `agent_ref`, each <= 1000, distinct, no overlap
 - `send {from_ref, to_name, to_namespace?, body}`
@@ -49,7 +49,7 @@ One JSON object per WebSocket text message. Every frame is a strict object `{v: 
 - `fetch {from_ref, msg_id}`
 - `status {from_ref, state, label?}`: self-reported status (see Agent card). Fire and forget: no reply on success.
 - `card_request {from_ref, aud, nonce}`: answered by `card` or `card_refused` (see Agent card).
-- `rename {agent_ref, proposed_name}`: rename a live agent; `proposed_name` 1..256 chars (the hub names it via `candidateName`). Answered by `renamed` or `error` (see Renames).
+- `rename {agent_ref, proposed_name, name_kind?}`: rename a live agent; `proposed_name` 1..256 chars (the hub names it via `candidateName`). Answered by `renamed` or `error` (see Renames).
 
 ### Hub to client (`SERVER_FRAMES`)
 
@@ -129,6 +129,7 @@ Plan: Task R393 in `docs/superpowers/plans/2026-10-21-openbus/05-client.md`; sch
 - Gate: `RENAME_MIN_CLIENT` (`0.64.0`, predicted): the first release carrying R393a, R393b and R393c, since it gates the hub, the daemon and the adapters. A hub with R393a but not R393b answers `rename` with `error bad_frame`. Only a daemon at or above it receives roster `former_names` and a former-name receipt `to_name`, and only a hub at or above it gets `rename`. Below it the hub resolves former names the same, without those fields, and the daemon renames by re-sending `agent_up` (no grace, no rate limit). At or above it, a re-sent `agent_up` is a reopen, never a rename.
 - Roster rows gain `former_names?: [{name, expires_at}]` (`FormerNamesSchema`): 1..`LIMITS.maxFormerNames` (5); absent when none. The hub may hold more live former names than it shows; those still resolve and stay reserved. The hub guarantees newest first, distinct, and never the row's `bus_name`, all case-insensitive; the decoder doesn't enforce them, so one bad row can't fail a roster.
 - A former name reaches its agent for `LIMITS.formerNameGraceMs` (1 h, the mail TTL). Name changes per agent are capped at `LIMITS.renamesPerHour` (10) per rolling hour; past it `rename` gets `error rate_limited` with message `RENAME_MESSAGES.rate` = `"Too many renames"`. A no-op doesn't count. A `rename` for an agent that isn't live is `error not_registered`.
+- `name_kind` on `agent_up` and `rename` (`NAME_KINDS`: `default | chosen`): only the daemon knows whether a name is the harness's fallback (`pi`, `codex`, `code-96`) or chosen. The hub mints a `default` name as `<base>-<4 hex>`, never reuses it and doesn't reserve it after a rename; a `chosen` former name is reserved for the grace. Absent means `chosen` (reserving a default is the safe error). The daemon sends the field only to hubs at or above the gate, since older hubs refuse unknown keys.
 - Receipts reuse `to_name`: a send resolved through a former name carries the current name.
 - Hub rules (reservation, default-name suffixes, resolution order) are enforced by the hub (R393b).
 

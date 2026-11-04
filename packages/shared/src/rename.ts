@@ -21,6 +21,18 @@ export const RENAME_MESSAGES = {
   rate: "Too many renames",
 } as const;
 
+/**
+ * Whose name it is (#393 amendment 1). `default`: the harness's fallback
+ * (`pi`, `codex`, `code-96`), which nobody chose; the hub mints it as
+ * `<base>-<4 hex>`, never reuses it and doesn't reserve it after a rename.
+ * `chosen`: anything else, reserved for the grace after a rename. Only the
+ * daemon knows which, so it says so; absent means `chosen`, since reserving
+ * a default is the safe error.
+ */
+export const NAME_KINDS = ["default", "chosen"] as const;
+export const NameKindSchema = z.enum(NAME_KINDS);
+export type NameKind = z.infer<typeof NameKindSchema>;
+
 /** A name the agent left, which still reaches it until `expires_at`. */
 export const FormerNameSchema = z.strictObject({
   name: BusNameSchema,
