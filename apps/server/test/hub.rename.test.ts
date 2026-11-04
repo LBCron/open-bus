@@ -16,6 +16,7 @@ import {
 } from "@ob/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { Hub } from "../src/hub/do.js";
+import { migrateHub } from "../src/hub/schema.js";
 import { hub } from "../src/hub/stub.js";
 import { type Daemon, daemon, e, machine, ns, waitFor } from "./helpers.js";
 
@@ -352,7 +353,7 @@ describe("rename (R393b)", () => {
     expect(await rename(d, "a", uniq("Sixth"))).toMatchObject({
       type: "error",
       code: "rate_limited",
-      message: RENAME_MESSAGES.rate,
+      message: RENAME_MESSAGES.room,
     });
     expect(await reg(d, "x", mine, n)).toBe(`${mine}-2`);
     const rc = await send(d, "s", mine);
@@ -689,8 +690,8 @@ describe("review fixes (R393b)", () => {
     // Seeded: commitName and the reservation keep this from happening.
     await inHub((_, st) =>
       st.storage.sql.exec(
-        `insert into former_names (agent_id, org_id, name, lname, kind, expires_at)
-         select id, org_id, ?, ?, 'chosen', ? from agents where name = ?`,
+        `insert into former_names (agent_id, org_id, name, lname, kind, expires_at, namespace, global)
+         select id, org_id, ?, ?, 'chosen', ?, namespace, global from agents where name = ?`,
         a,
         a.toLowerCase(),
         Date.now() + GRACE,
@@ -704,7 +705,7 @@ describe("review fixes (R393b)", () => {
     d.close();
   });
 
-  it("a namespace move or global flip drops the agent's former names", async () => {
+  it("a namespace move or global flip keeps chosen former names in the old scope, resolving to no one (#451)", async () => {
     const d = await at();
     const n1 = ns("rn");
     const n2 = ns("rn");
@@ -716,19 +717,27 @@ describe("review fixes (R393b)", () => {
     const y2 = uniq("Y2");
     await renamed(d, "y", y2);
     await reg(d, "s", uniq("Sender"), n2);
-    // X flips global: its former `foo` would otherwise be visible in n2.
+    // X flips global: its former `foo` stays reserved in n1 only, so it is
+    // neither visible nor delivered in n2.
     expect(await reg(d, "x", x2, n1, { global: true })).toBe(x2);
-    expect(await formerRows(x2)).toEqual([]);
+    expect(await formerRows(x2)).toEqual([foo]);
     expect(await send(d, "s", foo)).toMatchObject({
       state: "pending",
       to_name: y2,
     });
-    // A namespace move drops them too.
+    // A namespace move keeps them too (default ones go).
     const y3 = uniq("Y3");
     await renamed(d, "y", y3);
     expect(await formerRows(y3)).toHaveLength(2);
     expect(await reg(d, "y", y3, n1)).toBe(y3);
-    expect(await formerRows(y3)).toEqual([]);
+    expect((await formerRows(y3)).sort()).toEqual([foo, y2].sort());
+    const minted = await reg(d, "p", uniq("pi"), n1, { kind: "default" });
+    await renamed(d, "p", uniq("Pc"));
+    const pc = uniq("Pc2");
+    await renamed(d, "p", pc);
+    expect(await reg(d, "p", pc, n2)).toBe(pc);
+    expect(await formerRows(pc)).toHaveLength(1);
+    expect(await reg(d, "q", minted, n1)).toBe(`${minted}-2`);
     d.close();
   });
 
@@ -1046,7 +1055,8 @@ describe("#449: review of #446", () => {
     await reg(d, "a", uniq("Mover"), n1);
     const cur = await churn(d, "a", LIMITS.renamesPerHour);
     expect(await reg(d, "a", uniq("Elsewhere"), n2)).toBe(cur);
-    expect(await formerRows(cur)).toEqual([]);
+    // #451: its chosen former names stay, reserved in n1.
+    expect(await formerRows(cur)).toHaveLength(2);
     const ns2 = await inHub(
       (_, st) =>
         st.storage.sql
@@ -1125,5 +1135,236 @@ it("#449 N3: an agent holding another's minted name (the old hole) gets -2 on re
   expect(await formerRows(`${minted}-2`)).toEqual([]);
   // Its own agent takes it back.
   expect((await renamed(d, "x", minted)).bus_name).toBe(minted);
+  d.close();
+});
+
+describe("#451: a move or global flip keeps chosen former names reserved", () => {
+  /** rename_rl rows of the live agent `ref` on any machine named `name`. */
+  const log = (name: string) =>
+    inHub(
+      (_, st) =>
+        st.storage.sql
+          .exec(
+            "select count(*) as n from rename_rl r join agents a on a.id = r.agent_id where a.name = ?",
+            name,
+          )
+          .one().n,
+    );
+
+  it("a namespace move: a stranger in the old namespace gets -2 and its mail is refused, until the grace ends", async () => {
+    const t0 = Date.now() + 80 * GRACE;
+    await setClock(t0);
+    const d = await at();
+    const n1 = ns("rn");
+    const n2 = ns("rn");
+    const n3 = ns("rn");
+    await reg(d, "s1", uniq("Sender"), n1);
+    await reg(d, "s2", uniq("Sender"), n2);
+    const mine = uniq("Mine");
+    await reg(d, "a", mine, n1);
+    const other = uniq("Other");
+    await renamed(d, "a", other);
+    expect(await reg(d, "a", other, n2)).toBe(other);
+    // Still reserved in n1, and for a global; free in another namespace.
+    expect(await reg(d, "x", mine, n1)).toBe(`${mine}-2`);
+    expect(await reg(d, "g", mine, n3, { global: true })).toBe(`${mine}-3`);
+    // It resolves to no one: not delivered to the moved agent.
+    expect(await send(d, "s1", mine)).toMatchObject({
+      state: "refused",
+      reason: "unknown_agent",
+    });
+    // Nor in its new namespace, where it was never its name.
+    expect(await send(d, "s2", mine)).toMatchObject({
+      state: "refused",
+      reason: "unknown_agent",
+    });
+    // The roster shows no former name the agent cannot be reached by.
+    expect(row(await list(d, "s2"), other)?.former_names).toBeUndefined();
+    // Taking the name back in n2 keeps the n1 reservation.
+    await renamed(d, "a", mine);
+    expect(await reg(d, "y", mine, n1)).toBe(`${mine}-4`);
+    expect(await send(d, "s1", mine)).toMatchObject({
+      state: "refused",
+      reason: "unknown_agent",
+    });
+    // After the grace the name is free in n1.
+    await setClock(t0 + GRACE);
+    expect(await reg(d, "z", mine, n1)).toBe(mine);
+    d.close();
+  });
+
+  it("a global flip, both ways: the old scope keeps the reservation and refuses its mail", async () => {
+    const t0 = Date.now() + 90 * GRACE;
+    await setClock(t0);
+    const d = await at();
+    const n1 = ns("rn");
+    const n2 = ns("rn");
+    await reg(d, "s1", uniq("Sender"), n1);
+    await reg(d, "s2", uniq("Sender"), n2);
+    // Non-global to global.
+    const mine = uniq("Mine");
+    await reg(d, "a", mine, n1);
+    const other = uniq("Other");
+    await renamed(d, "a", other);
+    expect(await reg(d, "a", other, n1, { global: true })).toBe(other);
+    expect(await reg(d, "x", mine, n1)).toBe(`${mine}-2`);
+    expect(await send(d, "s1", mine)).toMatchObject({
+      state: "refused",
+      reason: "unknown_agent",
+    });
+    expect(await send(d, "s1", mine, n1)).toMatchObject({
+      state: "refused",
+    });
+    // Global to non-global: the reservation was everywhere, and stays so.
+    const gmine = uniq("GMine");
+    await reg(d, "b", gmine, n1, { global: true });
+    const gother = uniq("GOther");
+    await renamed(d, "b", gother);
+    expect(await reg(d, "b", gother, n1)).toBe(gother);
+    expect(await reg(d, "y", gmine, n2)).toBe(`${gmine}-2`);
+    expect(await send(d, "s1", gmine)).toMatchObject({
+      state: "refused",
+      reason: "unknown_agent",
+    });
+    await setClock(t0 + GRACE);
+    expect(await reg(d, "z", mine, n1)).toBe(mine);
+    expect(await reg(d, "w", gmine, n2)).toBe(gmine);
+    d.close();
+  });
+
+  it("a move that also changes the name reserves the old one in the old namespace", async () => {
+    const d = await at();
+    const n1 = ns("rn");
+    const n2 = ns("rn");
+    await reg(d, "s1", uniq("Sender"), n1);
+    const mine = uniq("Mine");
+    await reg(d, "a", mine, n1);
+    const other = uniq("Other");
+    expect(await reg(d, "a", other, n2)).toBe(other);
+    expect(await log(other)).toBe(1);
+    expect(await reg(d, "x", mine, n1)).toBe(`${mine}-2`);
+    expect(await send(d, "s1", mine)).toMatchObject({
+      state: "refused",
+      reason: "unknown_agent",
+    });
+    d.close();
+  });
+
+  it("a same-name move with maxFormerNames chosen names in grace cannot escape the room check", async () => {
+    const d = await at();
+    const n1 = ns("rn");
+    const n2 = ns("rn");
+    const mine = uniq("Mine");
+    await reg(d, "a", mine, n1);
+    const left = [mine];
+    let cur = mine;
+    for (let i = 0; i < LIMITS.maxFormerNames; i++) {
+      cur = uniq(`M${i}`);
+      await renamed(d, "a", cur);
+      left.push(cur);
+    }
+    left.pop();
+    expect(await reg(d, "a", cur, n2)).toBe(cur);
+    // The move counts nothing (the name did not change)...
+    expect(await log(cur)).toBe(LIMITS.maxFormerNames);
+    // ...and the five reservations still fill the room.
+    expect(await rename(d, "a", uniq("Sixth"))).toMatchObject({
+      type: "error",
+      code: "rate_limited",
+      message: RENAME_MESSAGES.room,
+    });
+    expect(await reg(d, "a", uniq("Sixth"), n2)).toBe(cur);
+    for (const f of left) expect(await reg(d, id("x"), f, n1)).toBe(`${f}-2`);
+    d.close();
+  });
+});
+
+describe("#451 nits", () => {
+  it("a reopen de-collided from its own name counts nothing (N1)", async () => {
+    const d = await at();
+    const n = ns("rn");
+    const dup = uniq("Dup");
+    await reg(d, "a", dup, n);
+    d.send({ v: 1, id: id("d"), type: "agent_down", agent_ref: "a" });
+    expect(await reg(d, "o", dup, n)).toBe(dup);
+    expect(await reg(d, "a", dup, n)).toBe(`${dup}-2`);
+    const log = await inHub(
+      (_, st) =>
+        st.storage.sql
+          .exec(
+            "select count(*) as n from rename_rl r join agents a on a.id = r.agent_id where a.name = ?",
+            `${dup}-2`,
+          )
+          .one().n,
+    );
+    expect(log).toBe(0);
+    d.close();
+  });
+
+  it("10 fresh renames in an hour, 5 of them minted: the defaults are dropped first at the limit (N3)", async () => {
+    const t0 = Date.now() + 100 * GRACE;
+    await setClock(t0);
+    const d = await at();
+    const n = ns("rn");
+    await reg(d, "s", uniq("Sender"), n);
+    const c0 = uniq("C0");
+    await reg(d, "a", c0, n);
+    const minted: string[] = [];
+    for (let i = 0; i < 5; i++)
+      minted.push((await renamed(d, "a", uniq(`pd${i}`), "default")).bus_name);
+    const chosen = [c0];
+    let cur = "";
+    for (let i = 1; i <= 5; i++) {
+      cur = uniq(`C${i}`);
+      await renamed(d, "a", cur);
+      chosen.push(cur);
+    }
+    chosen.pop();
+    // Every default row went first; the five chosen ones are all kept.
+    expect((await formerRows(cur)).sort()).toEqual([...chosen].sort());
+    expect(await rename(d, "a", uniq("Over"))).toMatchObject({
+      type: "error",
+      code: "rate_limited",
+      message: RENAME_MESSAGES.rate,
+    });
+    for (const m of minted) {
+      expect(await send(d, "s", m)).toMatchObject({
+        state: "refused",
+        reason: "unknown_agent",
+      });
+      expect(await reg(d, id("x"), m, n)).toBe(`${m}-2`);
+    }
+    for (const c of chosen) {
+      expect(await send(d, "s", c)).toMatchObject({
+        state: "pending",
+        to_name: cur,
+      });
+      expect(await reg(d, id("y"), c, n)).toBe(`${c}-2`);
+    }
+    d.close();
+  });
+});
+
+it("#451: migrateHub anchors existing former names to their agent's scope", async () => {
+  const d = await at();
+  const n = ns("rn");
+  const a = uniq("Mig");
+  await reg(d, "a", a, n, { global: true });
+  const b = uniq("Mig2");
+  await renamed(d, "a", b);
+  const got = await inHub((_, st) => {
+    const sql = st.storage.sql;
+    sql.exec("alter table former_names drop column namespace");
+    sql.exec("alter table former_names drop column global");
+    migrateHub(sql);
+    migrateHub(sql);
+    return sql
+      .exec(
+        "select namespace, global from former_names where lname = ?",
+        a.toLowerCase(),
+      )
+      .one();
+  });
+  expect(got).toEqual({ namespace: n, global: 1 });
   d.close();
 });
