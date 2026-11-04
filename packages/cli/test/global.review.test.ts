@@ -34,19 +34,19 @@ function setup() {
   return { ctx, dirs, ops: join(ctx.userHome, "code/ops") };
 }
 
-describe("M3: entries cover their subdirectories", () => {
-  it("add of a covered subdir says already global and adds nothing", async () => {
+describe("M3: an entry covers only itself (#397)", () => {
+  it("add of a subdir of a listed dir adds it, since it is not covered", async () => {
     const { ctx, dirs, ops } = setup();
     await main(["global", "add", "ops"], () => ctx);
     const sub = again(ctx, ops);
     expect(await main(["global", "add", "deep"], () => sub)).toBe(0);
     expect(sub.out()[2]).toBe(
-      "[[success]]✓[[/success]]  ~/code/ops/deep is already global.",
+      "[[success]]✓[[/success]]  ~/code/ops/deep is now global. Agents started there see every namespace.",
     );
-    expect(dirs()).toEqual([ops]);
+    expect(dirs()).toEqual([ops, `${ops}/deep`]);
   });
 
-  it("rm of an inherited subdir says it was not global and keeps the parent", async () => {
+  it("rm of a subdir that was never listed says it was not global", async () => {
     const { ctx, dirs, ops } = setup();
     await main(["global", "add", "ops"], () => ctx);
     const sub = again(ctx, ops);
