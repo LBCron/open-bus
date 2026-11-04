@@ -40,10 +40,12 @@ describe("limits and gate (R393a)", () => {
     expect(RENAME_MESSAGES).toEqual({ rate: "Too many renames" });
   });
 
-  it("gates above the latest release, 0.63.0", () => {
-    expect(RENAME_MIN_CLIENT).toBe("0.64.0");
+  it("gates above the latest release, 0.65.0 (without R393b)", () => {
+    expect(RENAME_MIN_CLIENT).toBe("0.66.0");
     expect(semverGte("0.63.0", RENAME_MIN_CLIENT)).toBe(false);
-    expect(semverGte("0.64.0", RENAME_MIN_CLIENT)).toBe(true);
+    expect(semverGte("0.64.0", RENAME_MIN_CLIENT)).toBe(false);
+    expect(semverGte("0.65.0", RENAME_MIN_CLIENT)).toBe(false);
+    expect(semverGte("0.66.0", RENAME_MIN_CLIENT)).toBe(true);
   });
 });
 

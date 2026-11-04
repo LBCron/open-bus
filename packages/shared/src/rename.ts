@@ -9,11 +9,12 @@ import { BusNameSchema } from "./names.js";
  * the hub sends `former_names` and a former-name `to_name` only to daemons at
  * or above it; the daemon sends `rename` only to hubs at or above it (below
  * it, it re-sends `agent_up`); adapters offer the tool only on daemons at or
- * above it. Predicted as the release after 0.63.0: re-pin it if those land
- * in different releases. A hub with R393a but not R393b answers `rename`
+ * above it. 0.64.0 shipped the wire (R393a) and 0.65.0 shipped without
+ * the hub and daemon halves, so the gate is the release after 0.65.0:
+ * re-pin it if those land in different releases. A hub with R393a but not R393b answers `rename`
  * with `error bad_frame`.
  */
-export const RENAME_MIN_CLIENT = "0.64.0";
+export const RENAME_MIN_CLIENT = "0.66.0";
 
 /** Pinned `error` messages for `rename` refusals. Clients may match on them. */
 export const RENAME_MESSAGES = {

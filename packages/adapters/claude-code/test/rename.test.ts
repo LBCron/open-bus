@@ -5,6 +5,11 @@ import { RENAME_MIN_CLIENT } from "@ob/shared";
 import { describe, expect, it, vi } from "vitest";
 import { callTool, offeredTools, TOOLS } from "../src/tools.ts";
 
+/** The patch release after the gate: above it, whatever it is pinned to. */
+const ABOVE_GATE = RENAME_MIN_CLIENT.replace(/\d+$/, (p) =>
+  String(Number(p) + 1),
+);
+
 type Frame = { type: string } & Record<string, unknown>;
 
 /** A daemon that answers `answer`, and whose welcome named `bus` at hello. */
@@ -59,11 +64,18 @@ describe("the rename tool at the gate (#393)", () => {
   });
 
   it("is offered only to a daemon at or above RENAME_MIN_CLIENT", () => {
-    for (const v of [RENAME_MIN_CLIENT, "0.65.0", "1.0.0"]) {
+    for (const v of [RENAME_MIN_CLIENT, ABOVE_GATE, "1.0.0"]) {
       expect(offeredTools(v).map((t) => t.name)).toContain("rename");
       expect(offeredTools(v)).toHaveLength(TOOLS.length);
     }
-    for (const v of ["0.63.0", "0.54.0", "0.44.0", undefined, "dev"]) {
+    for (const v of [
+      "0.65.0",
+      "0.63.0",
+      "0.54.0",
+      "0.44.0",
+      undefined,
+      "dev",
+    ]) {
       expect(offeredTools(v).map((t) => t.name)).not.toContain("rename");
       expect(offeredTools(v)).toHaveLength(TOOLS.length - 1);
     }

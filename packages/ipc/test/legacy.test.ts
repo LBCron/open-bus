@@ -8,6 +8,11 @@ import {
   seesRename,
 } from "../src/index.ts";
 
+/** The patch release after the gate: above it, whatever it is pinned to. */
+const ABOVE_GATE = RENAME_MIN_CLIENT.replace(/\d+$/, (p) =>
+  String(Number(p) + 1),
+);
+
 describe("legacyKind (C23c, C26a)", () => {
   it("keeps the three kinds a 0.44.x client knows", () => {
     for (const k of LEGACY_KINDS) expect(legacyKind(k)).toBe(k);
@@ -62,7 +67,8 @@ describe("the rename gate (#393)", () => {
     expect(seesRename(undefined)).toBe(false);
     expect(seesRename("0.63.0")).toBe(false);
     expect(seesRename(RENAME_MIN_CLIENT)).toBe(true);
-    expect(seesRename("0.65.0")).toBe(true);
+    expect(seesRename("0.65.0")).toBe(false);
+    expect(seesRename(ABOVE_GATE)).toBe(true);
   });
 
   it("strips former names and a receipt's to_name below the gate", () => {
