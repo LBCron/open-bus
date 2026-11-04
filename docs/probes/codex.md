@@ -41,6 +41,7 @@ MCP, attestation, wake, kind. macOS arm64.
 
 **Loads.** `[mcp_servers.probe]` in `config.toml` (command, args, env) is
 spawned and initialised:
+
 - `clientInfo` is `codex-mcp-client` 0.165.0, protocol `2025-06-18`.
 - The client capabilities are `elicitation` and experimental
   `codex/auth-change`; there is no sampling.
@@ -56,6 +57,7 @@ named vars through.
 
 **Session identity arrives per call, not at spawn.** Every `tools/call` carries
 `_meta`:
+
 - Keys: `callId`, `itemId`, `progressToken`, `sessionId`, `threadId`,
   `windowId`, and `x-codex-turn-metadata`.
 - `x-codex-turn-metadata` holds `session_id`, `thread_id`, `turn_id`,
@@ -69,17 +71,18 @@ servers.
 
 **Parent process:**
 
-| Harness                     | MCP server's parent                                                                                     |
-| --------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `codex exec`, `--no-daemon` | the `codex` process itself                                                                              |
-| TUI                         | the shared daemon `codex app-server --listen unix:// --managed-daemon`; the TUI starts it if it is down |
-| desktop app                 | the app's own `codex app-server` (bundled binary, stdio child of the Electron main process)             |
+| Harness | MCP server's parent |
+|---|---|
+| `codex exec`, `--no-daemon` | the `codex` process itself |
+| TUI | the shared daemon `codex app-server --listen unix:// --managed-daemon`; the TUI starts it if it is down |
+| desktop app | the app's own `codex app-server` (bundled binary, stdio child of the Electron main process) |
 
 The desktop row comes from static evidence only. The app spawns its bundled
 `codex app-server` over stdio. It uses the shared daemon only when
 `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1` is set.
 
 **The app reads the same `~/.codex`:**
+
 - Its JS resolves `${CODEX_HOME:-$HOME/.codex}`.
 - The real `config.toml` has a `[desktop]` table that the app writes
   (`followUpQueueMode` and others), next to the user's `mcp_servers`. The app
@@ -92,6 +95,7 @@ So one `[mcp_servers.openbus]` entry reaches the CLI, the TUI and the app.
 ## 2. Attestation
 
 **Codex's on-disk state:**
+
 - Rollouts are at `sessions/YYYY/MM/DD/rollout-<ts>-<thread uuid>.jsonl`. The
   first line is `session_meta`, with keys `id session_id cwd originator source
   thread_source cli_version model_provider git timestamp ...`.
@@ -113,6 +117,7 @@ server gets none of them.
 **Proposed check.** The adapter defers its hello until its first `tools/call`,
 then sends `{thread_id, call_id, pid}` from `_meta`. The daemon accepts only
 when all of the following hold:
+
 1. The adapter's parent P has a `codex` comm, and its start time matches the
    one recorded at hello. This is the pid-reuse guard, as for Pi and omp.
 2. P holds `<codex home>/thread-writer-locks/<thread_id>.lock` (`lsof -t`; on
@@ -125,6 +130,7 @@ when all of the following hold:
    `state_5` `source` is not `{"subagent":...}`. This is the omp-style guard.
 
 **How it can fail:**
+
 - A process that is not P's child fails step 1. A replayed old `call_id`
   fails step 3.
 - A shell in thread A of the same daemon or app cannot claim thread B without
@@ -190,6 +196,7 @@ only the desktop app. The model then emits a `custom_tool_call` named `exec`
 whose JavaScript calls `tools.<name>(…)`, and every OpenBus call is a nested
 `tools/call`. Source: openai/codex `rust-v0.166.0-alpha.5.1`
 (`.superpowers/sdd/05-client/c27-probe-report.md`).
+
 - `_meta.callId` is a fresh `exec-<uuid>` per nested call. The rollout never
   has it at request time; Codex writes it only afterwards, as the
   `item_completed` `McpToolCall` item id.
@@ -201,6 +208,7 @@ The adapter sends `item_id` (`_meta.itemId`) and `turn_id` (the turn
 metadata's) in the hello. When no open `function_call` matches `call_id`, the
 daemon accepts only if all of the following hold (steps 1, 2 and 4 above are
 unchanged):
+
 1. The rollout has a `response_item` `custom_tool_call` with `payload.id ==
    item_id`, `name == "exec"`, no `namespace`, and an `input` containing the
    literal `mcp__openbus__`: the exec names an OpenBus tool.
@@ -222,6 +230,7 @@ already made an OpenBus call. Make each OpenBus call in its own exec." This
 keeps one use per model-written item, as with a `function_call`.
 
 **Residuals (code mode):**
+
 - Refused, by design (fail closed): a second OpenBus call in one exec; a call
   after the exec yielded (`yield_control()`, the yield timeout) or after
   `notify()` wrote an output for it, since the exec then reads as closed; a
@@ -253,14 +262,15 @@ writes `queue_1.sqlite` (`queued_items`; a trigger bumps
 (`thread/queue/changed`) and starts a turn with that text as the user message.
 Observed:
 
-| Host                                                           | Idle thread, after `codex queue`                                  |
-| -------------------------------------------------------------- | ----------------------------------------------------------------- |
-| shared daemon (the TUI's host)                                 | turn started within 1 s; the stub got the queued text             |
-| TUI attached to the daemon                                     | same; the TUI rendered the turn and its reply                     |
-| private stdio app-server, no daemon running (how the app runs) | turn started; the stub got the text                               |
-| `codex exec`, after exit                                       | stored in `queue_1.sqlite`, no turn: delivered on the next resume |
+| Host | Idle thread, after `codex queue` |
+|---|---|
+| shared daemon (the TUI's host) | turn started within 1 s; the stub got the queued text |
+| TUI attached to the daemon | same; the TUI rendered the turn and its reply |
+| private stdio app-server, no daemon running (how the app runs) | turn started; the stub got the text |
+| `codex exec`, after exit | stored in `queue_1.sqlite`, no turn: delivered on the next resume |
 
 So:
+
 - **TUI:** a real wake, like Claude channels.
 - **exec:** no wake. It is one-shot, so a message waits for a resume.
 - **App:** a wake is expected, because its bundled 0.155 alpha binary has
@@ -274,6 +284,7 @@ The daemon transport would shell out to the user's own `codex queue` (or write
 end.
 
 **Ruled out:**
+
 - MCP pushes. `notifications/claude/channel` and `notifications/message` are
   ignored, and `sampling/createMessage` returns -32601.
 - `thread/inject_items` adds items without starting a turn.
@@ -292,6 +303,7 @@ by `codex exec`, with a hostile body. (The shipped transport runs `codex
 queue` only for a live thread whose host wakes; an exec or closed thread gets
 no `codex queue` and keeps the offline semantics, so no receipt says less
 than what Codex will do.)
+
 - One row in `queued_items`, text exactly as sent: the `[openbus] Message
   from peer to you (cx). … (msg_id mmmmmmmmmmmmmmm1)` header, the body's
   `$(touch …)` and backticks literal (no file created), and a forged
@@ -317,6 +329,7 @@ than what Codex will do.)
 Readers have been kind-agnostic since 0.45.0: `KindTokenSchema` and
 `displayKind` turn an unknown kind into `other`. So `codex` needs no new
 version constant:
+
 - The hub already hides any kind outside `PRE_TOKEN_KINDS` from daemons below
   `KIND_TOKEN_MIN_CLIENT` (the SQL filter).
 - For adapters without the IPC marker, the daemon already rewrites any unknown
@@ -327,6 +340,7 @@ version constant:
   `ompAsPi` and is hard-wired to omp.
 
 **Recommendation:**
+
 - Old daemons: hidden, as today, through the hub filter. Their closed enum
   cannot hold `other`.
 - Old adapters: show `codex` as `pi`, the existing `legacyKind`. The row stays
