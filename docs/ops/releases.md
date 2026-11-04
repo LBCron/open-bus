@@ -1,48 +1,39 @@
 # Releases
 
 release-please keeps one release PR open on `main`. The `release-cadence`
-workflow (`scripts/ci/release-cadence.ts`) arms it with auto-merge once its
-checks are green and the merge queue holds nothing but release PRs, or once it
-has been green for 30 minutes. The merge publishes `@open-bus/cli` to npm and
+workflow (`scripts/ci/release-cadence.ts`) arms it with auto-merge once it
+carries the `release-ok` label, its checks are green, and the merge queue holds
+nothing but release PRs (or it has been green for 30 minutes). The merge publishes `@open-bus/cli` to npm and
 upgrades prod from CI (`deploy-prod`, then `verify-release`).
+
+## Approving a release
+
+Releases ship only when a person approves them (#435). The cadence arms the
+release PR only once it carries the `release-ok` label:
+
+    gh pr edit <release PR> --add-label release-ok
+
+Without it:
+
+- `plan` does not arm the PR, and logs that it has no `release-ok` label.
+- `arm` re-reads the labels right before it enqueues, so taking the label off
+  during a run still wins.
+- If the cadence already armed the PR and it is not yet in the queue, the next
+  run disables auto-merge. It never touches an arm a person set.
+- An unapproved release PR doesn't get the 24-hour `blocker` issue: waiting for
+  approval isn't stuck. Failing checks still open one.
+
+Once the PR is in the merge queue, removing `release-ok` doesn't take it out.
+Remove it from the queue in GitHub instead. Arming the release PR by hand
+still works at any time.
 
 ## Holding a release
 
-To keep a release from shipping, such as while a fix for a just-merged bug is
-still in review, put the `release-hold` label on the release PR:
-
-    gh pr edit <release PR> --add-label release-hold
-
-While the label is on:
-
-- `plan` does not arm the PR.
-- `arm` re-reads the labels right before it enqueues, so a hold set during a
-  run still wins.
-- If the cadence already armed the PR and it is not yet in the queue, the next
-  run disables auto-merge. It never touches an arm a person set.
-- The `release-hold` check fails (`.github/workflows/release-hold.yml`, #435).
-  It's a required check, so a held release PR can't merge. It runs on the PR's
-  label events and in the merge queue, where it reads the queued PR's live
-  labels.
-- Adding the label while the PR is already in the merge queue takes it out of
-  the queue (the `dequeue` job). The queue's `release-hold` run may already
-  have passed by then, so the check alone wouldn't stop it.
-- The failing `release-hold` check doesn't open a `blocker` issue: a held
-  release isn't a stuck one.
-- In the queue the check reads only the PR its entry names. That's enough
-  while the queue's grouping is `ALLGREEN`, where each entry's own checks
-  must pass. If the queue moves to `HEADGREEN`, a held release batched ahead
-  of another PR could merge on that PR's green run, so revisit this check.
-- If the `dequeue` job fails (its run shows an error), remove the release PR
-  from the merge queue in GitHub by hand.
-
-Remove the label to release. The `release-hold` check re-runs and passes, and
-the next cadence run (every 15 minutes, or after CI) arms the PR as usual:
+The `release-hold` label still stops the cadence, even with `release-ok` on:
+`plan` doesn't arm the PR, `arm` re-checks it right before enqueueing, and an
+arm the cadence set (not yet queued) is disabled. Remove it to release:
 
     gh pr edit <release PR> --remove-label release-hold
-
-A held release PR that stays open for over 24 hours still gets a `blocker`
-issue, as a reminder that the hold is on.
 
 ## Card keys
 

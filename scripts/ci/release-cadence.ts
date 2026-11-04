@@ -2,8 +2,9 @@
 // queue has drained, and keep one `blocker` issue open while a release is stuck.
 // Usage: node --experimental-strip-types scripts/ci/release-cadence.ts <plan|arm|blocker> --repo owner/name
 // `plan` prints `write=true|false` (does arm need the App token?).
-// A `release-hold` label on the release PR stops arming; `arm` re-reads the
-// labels right before it enqueues, so a hold set mid-run still wins.
+// Opt-in (#435): only a release PR labeled `release-ok` is armed, and a
+// `release-hold` label still stops it. `arm` re-reads the labels right before
+// it enqueues, so a change mid-run wins.
 // Needs GH_TOKEN in the environment. `arm` runs with the release App's token
 // (so the merge triggers workflows); `blocker` runs with GITHUB_TOKEN.
 import { spawnSync } from "node:child_process";
@@ -17,8 +18,8 @@ const DAY_MS = 24 * 3600_000;
 export const DRAIN_CAP_MS = 30 * 60_000;
 /** On the release PR, this label stops the cadence from arming it (docs/ops/releases.md). */
 export const HOLD_LABEL = "release-hold";
-/** The CI check that fails while the hold is on (#435): a held release isn't a stuck one. */
-export const HOLD_CHECK = "release-hold";
+/** The cadence arms the release PR only with this label (#435): a person decides a release ships. */
+export const OK_LABEL = "release-ok";
 
 export type ExecResult = { code: number; stdout: string; stderr: string };
 export type Exec = (
@@ -84,6 +85,8 @@ export type ReleasePr = {
   queued: boolean;
   armed: boolean;
   armedBy?: string;
+  /** Carries the release-ok label (#435). */
+  ok: boolean;
   /** Carries the release-hold label. */
   held: boolean;
   rollup: string;
@@ -147,6 +150,9 @@ async function snapshot(exec: Exec, repo: string): Promise<Snapshot> {
       held: (n.labels?.nodes ?? []).some(
         (l: { name?: string }) => l.name === HOLD_LABEL,
       ),
+      ok: (n.labels?.nodes ?? []).some(
+        (l: { name?: string }) => l.name === OK_LABEL,
+      ),
       rollup: rollup?.state ?? "NONE",
       contexts,
       oid: String(commit?.oid ?? ""),
@@ -161,6 +167,7 @@ export type ArmResult =
   | { action: "not-green"; pr: number; state: string }
   | { action: "waiting"; entries: number }
   | { action: "held"; pr: number }
+  | { action: "not-ok"; pr: number }
   | { action: "disarmed"; pr: number }
   | { action: "armed"; pr: number };
 
@@ -210,6 +217,16 @@ function plan(
       do: "none",
       result: { action: "held", pr: pr.number },
       msg: `release PR #${pr.number} has the ${HOLD_LABEL} label, not arming`,
+    };
+  }
+  if (!pr.ok) {
+    // Opt-in (#435): without release-ok, take back an arm the App set.
+    const ours = Boolean(appLogin) && bare(pr.armedBy) === bare(appLogin);
+    if (pr.armed && ours) return { do: "disarm", pr };
+    return {
+      do: "none",
+      result: { action: "not-ok", pr: pr.number },
+      msg: `release PR #${pr.number} has no ${OK_LABEL} label, not arming`,
     };
   }
   if (pr.armed) {
@@ -274,7 +291,9 @@ export async function arm(
     o.log(
       p.pr.held
         ? `disabled auto-merge on release PR #${p.pr.number}: it has the ${HOLD_LABEL} label`
-        : `disabled auto-merge on release PR #${p.pr.number} to re-check the drain on its current head`,
+        : !p.pr.ok
+          ? `disabled auto-merge on release PR #${p.pr.number}: it has no ${OK_LABEL} label`
+          : `disabled auto-merge on release PR #${p.pr.number} to re-check the drain on its current head`,
     );
     return { action: "disarmed", pr: p.pr.number };
   }
@@ -290,9 +309,14 @@ export async function arm(
     "--jq",
     ".labels[].name",
   ]);
-  if (labels.split("\n").some((l) => l.trim() === HOLD_LABEL)) {
+  const now = labels.split("\n").map((l) => l.trim());
+  if (now.includes(HOLD_LABEL)) {
     o.log(`release PR #${p.pr.number} has the ${HOLD_LABEL} label, not arming`);
     return { action: "held", pr: p.pr.number };
+  }
+  if (!now.includes(OK_LABEL)) {
+    o.log(`release PR #${p.pr.number} has no ${OK_LABEL} label, not arming`);
+    return { action: "not-ok", pr: p.pr.number };
   }
   if (p.capHit)
     o.log(
@@ -320,12 +344,7 @@ const FAILED = new Set([
   "ACTION_REQUIRED",
   "STARTUP_FAILURE",
 ]);
-/** Failing checks, except the hold check itself (#435). */
 function failing(contexts: Context[]): { name: string; url?: string }[] {
-  return allFailing(contexts).filter((f) => f.name !== HOLD_CHECK);
-}
-
-function allFailing(contexts: Context[]): { name: string; url?: string }[] {
   const out: { name: string; url?: string }[] = [];
   for (const c of contexts) {
     if (c.__typename === "StatusContext") {
@@ -403,11 +422,9 @@ export async function blocker(o: {
   }
 
   if (pr) {
-    // A rollup failing only on the hold check is a held release, not a stuck one.
-    const bad =
-      (pr.rollup === "FAILURE" || pr.rollup === "ERROR") &&
-      (failing(pr.contexts).length > 0 || allFailing(pr.contexts).length === 0);
-    const old = o.now() - Date.parse(pr.createdAt) > DAY_MS;
+    const bad = pr.rollup === "FAILURE" || pr.rollup === "ERROR";
+    // Waiting for release-ok (#435) is a person's choice, not a stuck release.
+    const old = pr.ok && o.now() - Date.parse(pr.createdAt) > DAY_MS;
     if (!bad && !old)
       return closed.length
         ? { action: "closed", issues: closed }

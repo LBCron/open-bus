@@ -4,8 +4,8 @@ import {
   blocker,
   DRAIN_CAP_MS,
   type Exec,
-  HOLD_CHECK,
   HOLD_LABEL,
+  OK_LABEL,
   RELEASE_BRANCH,
   willWrite,
 } from "./release-cadence.ts";
@@ -65,7 +65,9 @@ function fake(f: Fixture) {
               title: "chore(main): release 0.6.0",
               createdAt: f.pr.createdAt ?? hoursAgo(1),
               isInMergeQueue: f.pr.queued ?? false,
-              labels: { nodes: (f.pr.labels ?? []).map((name) => ({ name })) },
+              labels: {
+                nodes: (f.pr.labels ?? [OK_LABEL]).map((name) => ({ name })),
+              },
               autoMergeRequest: f.pr.armed
                 ? {
                     enabledAt: hoursAgo(0),
@@ -110,7 +112,7 @@ function fake(f: Fixture) {
       );
     }
     if (args[0] === "pr" && args[1] === "view")
-      return ok((f.pr?.labelsNow ?? f.pr?.labels ?? []).join("\n"));
+      return ok((f.pr?.labelsNow ?? f.pr?.labels ?? [OK_LABEL]).join("\n"));
     if (args[0] === "issue" && args[1] === "list")
       return ok(JSON.stringify(f.issues ?? []));
     if (args[0] === "api" && String(args[1]).endsWith("/releases/latest"))
@@ -446,7 +448,7 @@ describe("release-hold", () => {
     expect(g.calls[view]?.join(" ")).toContain("301");
   });
   it("other labels do not hold", async () => {
-    const g = fake({ pr: { labels: ["autorelease: pending"] } });
+    const g = fake({ pr: { labels: ["autorelease: pending", OK_LABEL] } });
     expect((await arm_(g)).action).toBe("armed");
   });
   it("a hold takes back the App's arm, but never a human's, and never a queued PR", async () => {
@@ -526,24 +528,18 @@ describe("blocker", () => {
     expect(title(g.wrote("issue create")[0] as string[])).toContain("24 hours");
   });
 
-  it("ignores the release-hold check itself: a held PR is not a stuck one (#435)", async () => {
-    const hold = {
-      __typename: "CheckRun",
-      name: HOLD_CHECK,
-      conclusion: "FAILURE",
-      detailsUrl: "https://ci/hold",
-    };
-    const held = await run({
-      pr: { state: "FAILURE", labels: [HOLD_LABEL], contexts: [hold] },
+  it("waiting for release-ok is not stuck: no 24-hour issue, but failing checks still open one (#435)", async () => {
+    const idle = await run({
+      pr: { createdAt: hoursAgo(72), labels: ["autorelease: pending"] },
     });
-    expect(held.r.action).toBe("none");
-    expect(held.g.wrote("issue create")).toEqual([]);
-    // Another failing check still opens one, naming only that check.
-    const both = await run({
+    expect(idle.r.action).toBe("none");
+    expect(idle.g.wrote("issue create")).toEqual([]);
+    const red = await run({
       pr: {
+        createdAt: hoursAgo(72),
+        labels: [],
         state: "FAILURE",
         contexts: [
-          hold,
           {
             __typename: "CheckRun",
             name: "test",
@@ -553,10 +549,10 @@ describe("blocker", () => {
         ],
       },
     });
-    expect(both.r).toEqual({ action: "opened" });
-    const b = body(both.g.wrote("issue create")[0] as string[]);
-    expect(b).toContain("[test](https://ci/test)");
-    expect(b).not.toContain(HOLD_CHECK);
+    expect(red.r).toEqual({ action: "opened" });
+    const t = red.g.wrote("issue create")[0] as string[];
+    expect(t[t.indexOf("--title") + 1]).toContain("failing checks");
+    expect(t[t.indexOf("--title") + 1]).not.toContain("24 hours");
   });
 
   it("opens nothing for a young, green PR", async () => {
@@ -700,5 +696,65 @@ describe("blocker", () => {
       release: null,
     });
     expect(r.action).toBe("none");
+  });
+});
+
+describe("release-ok opt-in (#435, option B)", () => {
+  it("never arms a green, drained release PR without release-ok", async () => {
+    const f = { pr: { labels: ["autorelease: pending"] } };
+    expect(await willWrite({ exec: fake(f).exec, repo: REPO })).toBe(false);
+    const g = fake(f);
+    const r = await arm({ exec: g.exec, repo: REPO, log: () => {} });
+    expect(r).toEqual({ action: "not-ok", pr: 301 });
+    expect(g.wrote("pr merge")).toEqual([]);
+  });
+
+  it("arms once release-ok is on", async () => {
+    const g = fake({ pr: { labels: [OK_LABEL] } });
+    expect(
+      (await arm({ exec: g.exec, repo: REPO, log: () => {} })).action,
+    ).toBe("armed");
+  });
+
+  it("re-reads labels at arm time: release-ok removed after the snapshot wins", async () => {
+    const g = fake({ pr: { labels: [OK_LABEL], labelsNow: ["other"] } });
+    const r = await arm({ exec: g.exec, repo: REPO, log: () => {} });
+    expect(r).toEqual({ action: "not-ok", pr: 301 });
+    expect(g.wrote("pr merge")).toEqual([]);
+  });
+
+  it("the hold still wins over release-ok", async () => {
+    const g = fake({ pr: { labels: [OK_LABEL, HOLD_LABEL] } });
+    expect(
+      (await arm({ exec: g.exec, repo: REPO, log: () => {} })).action,
+    ).toBe("held");
+  });
+
+  it("disarms the App's arm when release-ok is taken off; never a person's", async () => {
+    const ours = fake({ pr: { armed: true, labels: [] } });
+    expect(
+      (
+        await arm({
+          exec: ours.exec,
+          repo: REPO,
+          log: () => {},
+          appLogin: "oa-release",
+        })
+      ).action,
+    ).toBe("disarmed");
+    const theirs = fake({
+      pr: { armed: true, armedBy: "leourbina", labels: [] },
+    });
+    expect(
+      (
+        await arm({
+          exec: theirs.exec,
+          repo: REPO,
+          log: () => {},
+          appLogin: "oa-release",
+        })
+      ).action,
+    ).not.toBe("disarmed");
+    expect(theirs.wrote("pr merge")).toEqual([]);
   });
 });
