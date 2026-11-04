@@ -13,6 +13,7 @@ import {
 import { homedir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
 import { type Hello, SPAWNED_SOURCES, systemTool } from "@ob/ipc";
+import { semverGte } from "@ob/shared";
 import { lstartEpoch } from "./presence/opencode.ts";
 
 /**
@@ -29,7 +30,21 @@ export const CODEX_REFUSALS = {
   /** DRAFT (C27), pending Design. */
   oneExec:
     "this exec already made an OpenBus call. Make each OpenBus call in its own exec.",
+  /** C27k (Design-approved): an adapter from before C27a sends no item id. */
+  staleAdapter:
+    "its OpenBus server is older than the daemon. Ask the user to restart the Codex app.",
 } as const;
+
+/** The first release whose adapter sends `item_id` (C27a). */
+const ITEM_ID_SINCE = "0.61.1";
+
+/**
+ * Whether the hello's marker (C23c) is from before ITEM_ID_SINCE: absent, or
+ * a release below it. A malformed one is not taken as older.
+ */
+const beforeItemId = (client: string | undefined): boolean =>
+  client === undefined ||
+  (semverGte(client, "0.0.0") && !semverGte(client, ITEM_ID_SINCE));
 
 /**
  * The tool namespace Codex gives our MCP entry: `mcp__<entry name>`, so the
@@ -318,6 +333,14 @@ export function codexAttestor(deps: CodexAttestDeps = {}): CodexAttestor {
     // One hello per exec: a second OpenBus call in it is told to use its own.
     if (itemUsed()) return no(CODEX_REFUSALS.oneExec);
     if (execOpen(scan)) return admitExec();
+    // An exec's call with no item id from an adapter older than C27a: it
+    // outlived an upgrade in a thread Codex kept open. No wait helps it.
+    if (
+      !item &&
+      EXEC_CALL.test(cx.call_id) &&
+      beforeItemId(hello.client_version)
+    )
+      return no(CODEX_REFUSALS.staleAdapter);
     if (!retry || retryMs <= 0) return no(CODEX_REFUSALS.callNotFound);
     // The live capture saw the call flushed before the MCP request; one short
     // wait covers a slower disk. Spent now: each call id gets one wait.

@@ -45,7 +45,6 @@ export function forOldClient<F extends DaemonFrame>(f: F): F {
 type Row = z.infer<typeof AgentInfo>;
 /** A roster row without the agent card fields. */
 const plainRow = ({
-  role: _r,
   status: _s,
   status_label: _l,
   status_at: _a,
@@ -54,8 +53,7 @@ const plainRow = ({
 
 /**
  * A daemon frame as a client below AGENT_CARD_MIN_CLIENT must receive it
- * (AC5a): no role or status on a roster, self or status row, no `to_name` on a receipt, and
- * `role_vacant`, which its reason enum lacks, as `unknown_agent`.
+ * (AC5a): no status on a roster, self or status row.
  */
 export function withoutCard<F extends DaemonFrame>(f: F): F {
   switch (f.type) {
@@ -69,20 +67,10 @@ export function withoutCard<F extends DaemonFrame>(f: F): F {
         namespaces: f.namespaces.map((n) => ({
           ...n,
           agents: n.agents.map(
-            ({ role: _r, status: _s, status_label: _l, status_at: _a, ...a }) =>
-              a,
+            ({ status: _s, status_label: _l, status_at: _a, ...a }) => a,
           ),
         })),
       };
-    case "receipt": {
-      const { to_name: _t, ...r } = f as Extract<
-        DaemonFrame,
-        { type: "receipt" }
-      >;
-      return (
-        r.reason === "role_vacant" ? { ...r, reason: "unknown_agent" } : r
-      ) as F;
-    }
     default:
       return f;
   }

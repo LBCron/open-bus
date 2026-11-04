@@ -637,7 +637,12 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
     sessions,
     log,
     ...deps.hub,
-    onFrame: (frame) => {
+    onFrame: (raw) => {
+      // An old hub's `role_vacant` (roles are gone) reads as an unknown name, for every client.
+      const frame =
+        raw.type === "receipt" && raw.reason === "role_vacant"
+          ? { ...raw, reason: "unknown_agent" as const }
+          : raw;
       switch (frame.type) {
         case "deliver":
           void delivery.deliver(frame);
@@ -675,7 +680,6 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
                       msg_id: f.msg_id,
                       state: f.state,
                       ...(f.reason ? { reason: f.reason } : {}),
-                      ...(frame.to_name ? { to_name: frame.to_name } : {}),
                     }
                   : frame,
               );
@@ -897,7 +901,6 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
                   (mine.get(a.name) === a.kind ? cfg.label : ""),
                 state: a.state ?? ("live" as const),
                 // Agent card (AC5c); the IPC server strips them below the gate.
-                ...(a.role === undefined ? {} : { role: a.role }),
                 ...(a.status === undefined ? {} : { status: a.status }),
                 ...(a.status_label === undefined
                   ? {}
@@ -1096,7 +1099,7 @@ export async function runDaemon(deps: DaemonDeps = {}): Promise<Daemon> {
         limited: (ref) =>
           limited.has(ref) ? (caps.get(ref) ?? "machine") : undefined,
         version,
-        // The self tool's role and status: the agent's own row on its roster.
+        // The self tool's status: the agent's own row on its roster.
         ownRow: (ref) => {
           const me = agents.byRef(ref);
           if (

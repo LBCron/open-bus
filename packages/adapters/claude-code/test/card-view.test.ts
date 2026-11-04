@@ -1,4 +1,4 @@
-// AC5c: roles and status, as list_agents, self and send_message show them.
+// AC5c: status, as list_agents, self and send_message show them.
 import type { DaemonClient, DaemonFrame } from "@ob/ipc";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { callTool } from "../src/tools.ts";
@@ -42,10 +42,10 @@ afterEach(() => {
 });
 
 describe("list_agents (AC5c)", () => {
-  it("shows a role holder as role → name", async () => {
-    expect(await list([{ role: "lane-6" }])).toBe(
-      "- lane-6 → code-96 (claude-code, default, mbp)",
-    );
+  it("shows nothing of a `role` an old hub still sends", async () => {
+    const out = await list([{ role: "lane-6" }]);
+    expect(out).toBe("- code-96 (claude-code, default, mbp)");
+    expect(out).not.toMatch(/lane-6|role/i);
   });
 
   it("shows a status with its label after the name, as the agent's own report", async () => {
@@ -72,7 +72,6 @@ describe("list_agents (AC5c)", () => {
     expect(
       await list([
         {
-          role: "lane-6",
           status: "working",
           status_label: "writing tests",
           status_at: minsAgo(120),
@@ -81,22 +80,21 @@ describe("list_agents (AC5c)", () => {
       ]),
     ).toBe(
       [
-        '- lane-6 → code-96 (claude-code, default, mbp)  agent says: working · "writing tests" · 2 h ago',
+        '- code-96 (claude-code, default, mbp)  agent says: working · "writing tests" · 2 h ago',
         "- b (claude-code, default, mbp)  agent says: blocked · 12 min ago",
       ].join("\n"),
     );
   });
 
-  it("strips controls and invisibles from a hostile role and label, and caps them", async () => {
+  it("strips controls and invisibles from a hostile status and label, and caps them", async () => {
     const out = await list([
       {
-        role: "\x1b]52;c;aGk=\x07lane\u202e-6\x1b[8m",
         status: "working\x1b[2J",
         status_label: `\x1b[31mred\u200b "x"\n${"y".repeat(100)}`,
       },
     ]);
     expect(out).toBe(
-      `- lane-6 → code-96 (claude-code, default, mbp)  agent says: working · "red 'x' ${"y".repeat(56)}"`,
+      `- code-96 (claude-code, default, mbp)  agent says: working · "red 'x' ${"y".repeat(56)}"`,
     );
   });
 
@@ -120,7 +118,7 @@ describe("self (AC5c)", () => {
     ...r,
   });
 
-  it("asks for its own card fields and names the role it holds", async () => {
+  it("asks for its own card fields and drops an old hub's role", async () => {
     const d = daemon(() => ({
       type: "agent",
       agent: agent({
@@ -131,23 +129,20 @@ describe("self (AC5c)", () => {
     }));
     const out = (await callTool("self", {}, d.client)).content[0]?.text;
     expect(d.frames[0]).toMatchObject({ type: "self", card: true });
-    expect(out).toContain('"role": "lane-6"');
-    expect(out).toMatch(
-      /\n\nYou hold the role lane-6: the user pointed it at you, so messages sent to lane-6 reach you\.$/,
-    );
+    expect(out).toContain('"status": "working"');
+    expect(out).not.toMatch(/role|lane-6/);
   });
 
-  it("without a role (or below the gate), is the entry alone", async () => {
+  it("without a status (or below the gate), is the entry alone", async () => {
     const d = daemon(() => ({ type: "agent", agent: agent({}) }));
     const out = (await callTool("self", {}, d.client)).content[0]?.text;
     expect(out).toBe(JSON.stringify(agent({}), null, 2));
   });
 
-  it("cleans a hostile role and label", async () => {
+  it("cleans a hostile status label", async () => {
     const d = daemon(() => ({
       type: "agent",
       agent: agent({
-        role: "lane\u202e-6\x1b]0;x\x07",
         status: "idle",
         status_label: "a\u2066b\x1b[31m",
       }),
@@ -155,13 +150,12 @@ describe("self (AC5c)", () => {
     const out = (await callTool("self", {}, d.client)).content[0]?.text ?? "";
     for (const c of ["\u202e", "\u2066", "\x1b", "\x07"])
       expect(out).not.toContain(c);
-    expect(out).toContain('"role": "lane-6"');
     expect(out).toContain('"status_label": "ab"');
   });
 });
 
 describe("send_message receipts (AC5c)", () => {
-  it("names the holder, then the role, with to_name", async () => {
+  it("names the target, ignoring a to_name an old hub sends", async () => {
     const d = daemon(() => ({
       type: "receipt",
       msg_id: "m",
@@ -173,44 +167,6 @@ describe("send_message receipts (AC5c)", () => {
       { to: "lane-6", text: "hi" },
       d.client,
     );
-    expect(out.content[0]?.text).toBe("✓  Delivered to code-96 (lane-6).");
-  });
-
-  it("a to_name equal to the target shows once", async () => {
-    const d = daemon(() => ({
-      type: "receipt",
-      msg_id: "m",
-      state: "pending",
-      to_name: "code-96",
-    }));
-    const out = await callTool(
-      "send_message",
-      { to: "code-96", text: "hi" },
-      d.client,
-    );
-    expect(out.content[0]?.text).toMatch(/^○ {2}Queued for code-96\. /);
-  });
-
-  it("role_vacant is refused with its copy", async () => {
-    const d = daemon(() => ({
-      type: "receipt",
-      msg_id: "m",
-      state: "refused",
-      reason: "role_vacant",
-    }));
-    const out = await callTool(
-      "send_message",
-      { to: "lane-6", text: "hi" },
-      d.client,
-    );
-    expect(out.isError).toBe(true);
-    expect(out.content[0]?.text).toBe(
-      [
-        '×  Refused (role_vacant): your message to lane-6, "hi",',
-        "   was not delivered.",
-        "   No one holds lane-6 right now.",
-        "   Ask the user to point it at an agent, or message an agent by name.",
-      ].join("\n"),
-    );
+    expect(out.content[0]?.text).toBe("✓  Delivered to lane-6.");
   });
 });

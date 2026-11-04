@@ -92,12 +92,18 @@ export class Pending {
       return ok !== false;
     }
     // The hub's roster names agents `bus_name`; adapters see `name`, `state` and `live`.
+    // A `role` from an old hub is dropped, and so is a receipt's `to_name`: it
+    // names a role's holder, and roles are gone (#394).
+    if (frame.type === "receipt") {
+      const { to_name: _to, ...receipt } = frame;
+      return w.reply({ ...receipt, id: w.localId }) !== false;
+    }
     const ok = w.reply(
       frame.type === "roster"
         ? {
             ...frame,
             id: w.localId,
-            agents: frame.agents.map(({ bus_name, ...a }) => {
+            agents: frame.agents.map(({ bus_name, role: _role, ...a }) => {
               const state = rosterState(a);
               return { ...a, name: bus_name, state, live: state === "live" };
             }),
@@ -188,8 +194,8 @@ export type RouteCtx = {
   /** The daemon's version, reported by `self`. */
   version?: string;
   /**
-   * The agent's own hub roster row (AC5c), for `self` with `card`: its role
-   * and status. Undefined when the hub cannot be asked; resolves undefined
+   * The agent's own hub roster row (AC5c), for `self` with `card`: its
+   * status. Undefined when the hub cannot be asked; resolves undefined
    * when it does not answer.
    */
   ownRow?: (ref: string) => Promise<CardRow | undefined> | undefined;
@@ -198,13 +204,13 @@ export type RouteCtx = {
 /** The agent card fields of a roster row. */
 type CardRow = Pick<
   z.infer<typeof AgentInfo>,
-  "role" | "status" | "status_label" | "status_at"
+  "status" | "status_label" | "status_at"
 >;
 
 /** Only the card fields a row carries, none undefined. */
 const cardOf = (row: CardRow | undefined): CardRow =>
   Object.fromEntries(
-    (["role", "status", "status_label", "status_at"] as const).flatMap((k) =>
+    (["status", "status_label", "status_at"] as const).flatMap((k) =>
       row?.[k] === undefined ? [] : [[k, row[k]]],
     ),
   );
@@ -234,7 +240,7 @@ export function routeLocal(
         },
         ...(ctx.version ? { daemon_version: ctx.version } : {}),
       } as const;
-      // The role and status are the hub's: asked for only by the self tool, at the gate.
+      // The status is the hub's: asked for only by the self tool, at the gate.
       const own =
         frame.card && seesCard(hello.client_version)
           ? ctx.ownRow?.(ref)

@@ -377,8 +377,10 @@ export async function appServer(
   codexBin: string,
   cwd: string,
   env: NodeJS.ProcessEnv,
+  /** More `codex app-server` arguments, such as `-c` overrides. */
+  args: string[] = [],
 ): Promise<AppServer> {
-  const child = start("app-server", codexBin, ["app-server"], {
+  const child = start("app-server", codexBin, ["app-server", ...args], {
     cwd,
     env,
     stdin: "pipe",

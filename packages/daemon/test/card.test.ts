@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { daemonStatus, LineDecoder } from "@ob/ipc";
+import { DaemonFrame, daemonStatus, LineDecoder } from "@ob/ipc";
 import {
   AGENT_CARD_MIN_CLIENT,
   CARD_REFUSAL_CODES,
@@ -459,8 +459,8 @@ const helloOf = (agent_ref: string, marker?: string) => ({
   ...(marker ? { client_version: marker } : {}),
 });
 
-/** A hub that answers list with a role holder and a send to `lane-6` with role_vacant. */
-async function cardHub() {
+/** A hub that answers list with a status (and a `role`, as an old hub sends it) and a send with a refusal. */
+async function cardHub(reason = "ambiguous") {
   const h = await daemonHarness({ version: GATE });
   h.hubSock()?.on("message", (d) => {
     const f = JSON.parse(String(d));
@@ -488,8 +488,9 @@ async function cardHub() {
         type: "receipt",
         msg_id: "mmmmmmmmmmmmmmm1",
         state: "refused",
-        reason: f.to_name === "lane-6" ? "role_vacant" : "ambiguous",
-        to_name: "code-96",
+        reason,
+        // An old hub still names the role's holder; no client should see it.
+        to_name: "lane-6",
       });
   });
   return h;
@@ -503,8 +504,8 @@ type Got = { type: string; agents?: object[]; agent?: object };
 const byType = (frames: unknown[], type: string) =>
   (frames as Got[]).find((f) => f.type === type) as Got;
 
-describe("roster role and status, receipt to_name, role_vacant (AC5a)", () => {
-  it("a client at the gate sees them all", async () => {
+describe("roster status (AC5a)", () => {
+  it("a client at the gate sees the status, and nothing of an old hub's role", async () => {
     const h = await cardHub();
     const frames = await talk(
       h.socketPath,
@@ -513,17 +514,36 @@ describe("roster role and status, receipt to_name, role_vacant (AC5a)", () => {
     );
     expect(byType(frames, "roster").agents?.[0]).toMatchObject({
       name: "code-96",
-      role: "lane-6",
       status: "working",
       status_label: "writing tests",
       status_at: "2026-10-29T12:00:00.000Z",
     });
+    expect(byType(frames, "roster").agents?.[0]).not.toHaveProperty("role");
     expect(byType(frames, "receipt")).toMatchObject({
       state: "refused",
-      reason: "role_vacant",
-      to_name: "code-96",
+      reason: "ambiguous",
     });
+    expect(byType(frames, "receipt")).not.toHaveProperty("to_name");
     expect(byType(frames, "agent")).toMatchObject({ daemon_version: GATE });
+  });
+
+  it("an old hub's role_vacant reaches every client as unknown_agent", async () => {
+    // Each marker decodes what it gets: the payload must stay legal for a
+    // frozen client, and the gate one for today's schema.
+    for (const marker of [GATE, "0.53.0", undefined]) {
+      const h = await cardHub("role_vacant");
+      const frames = await talk(
+        h.socketPath,
+        [helloOf("ses_rv", marker), asks[1]],
+        2,
+      );
+      const V = marker === GATE ? { DaemonFrame } : marker ? V0540 : V0441;
+      for (const f of frames) V.DaemonFrame.parse(f);
+      expect(byType(frames, "receipt")).toMatchObject({
+        state: "refused",
+        reason: "unknown_agent",
+      });
+    }
   });
 
   /** An old adapter decodes every reply, and sees none of the card fields. */
@@ -538,14 +558,10 @@ describe("roster role and status, receipt to_name, role_vacant (AC5a)", () => {
       4,
     );
     for (const f of frames) V.DaemonFrame.parse(f);
+    expect(byType(frames, "receipt")).not.toHaveProperty("to_name");
     const roster = byType(frames, "roster");
     expect(roster.agents?.[0]).not.toHaveProperty("role");
     expect(roster.agents?.[0]).not.toHaveProperty("status");
-    expect(byType(frames, "receipt")).not.toHaveProperty("to_name");
-    expect(V.DaemonFrame.parse(byType(frames, "receipt"))).toMatchObject({
-      type: "receipt",
-      reason: "unknown_agent",
-    });
     expect(V.DaemonFrame.parse(byType(frames, "agent"))).toMatchObject({
       type: "agent",
       agent: { name: "ses_old" },
@@ -564,17 +580,4 @@ describe("roster role and status, receipt to_name, role_vacant (AC5a)", () => {
 
   it("0.44.1's frozen decoder, no marker, decodes every reply", () =>
     oldAdapter(undefined, V0441));
-
-  it("control: role_vacant unmapped fails the frozen decoders", () => {
-    const r = {
-      v: 1,
-      id: "s",
-      type: "receipt",
-      msg_id: "m",
-      state: "refused",
-      reason: "role_vacant",
-    };
-    expect(V0540.DaemonFrame.safeParse(r).success).toBe(false);
-    expect(V0441.DaemonFrame.safeParse(r).success).toBe(false);
-  });
 });
