@@ -75,7 +75,7 @@ test("Machines shows its heading and either the empty state or rows; Agents show
     )
   )
     await expect(
-      page.getByRole("columnheader", { name: /Status \(agent says\)/ }).first(),
+      page.getByRole("columnheader", { name: /Status.*agent says/ }).first(),
     ).toBeVisible();
   // Still live after a settle window: a drop right after hello would show here.
   await page.waitForTimeout(1_500);

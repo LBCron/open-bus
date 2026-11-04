@@ -1,0 +1,40 @@
+<!doctype html>
+<!--
+  Link confirm (D16, option 4A): apps/server serves it at GET /link after sign-in,
+  with this comment stripped. It replaces the minimal page in routes/link-page.ts.
+  Filled at max placeholder lengths (aud 267, aud_host 259, bus_host 253,
+  user_email 254, form_action 64, csrf_token 64, switch_url 200) it measures
+  7841 B, under 8 KB (8192).
+  No JS, no external requests, tokens inlined, the device-approval.html shell.
+  Markup is @ob/ui/shadcn's Card, Button and Separator; the CSS defines every class used.
+  Theme: prefers-color-scheme only (no data-theme, no ?theme).
+  Placeholders (HTML-escape every value):
+    {{aud}}         the validated origin, whole, e.g. "https://artifacts.leourbina.com"
+    {{aud_host}}    its host plus any port, no scheme, e.g. "artifacts.leourbina.com"
+    {{bus_host}}    no scheme, e.g. "bus.northwind.dev"
+    {{user_email}}  from Cloudflare Access OIDC
+    {{form_action}} e.g. "/link"
+    {{csrf_token}}  posted as "csrf"
+    {{switch_url}}  signs out and restarts sign-in
+  The form posts decision=allow or decision=cancel.
+  aud is shown whole, in mono, as text, never as a link. An IDN shows as its
+  punycode (https://xn--bcher-kva.example), as the URL parser gives it: that is
+  the origin the cards are bound to. Body copies sit in <bdi>; <title> cannot be
+  isolated, but a validated origin's host is ASCII only.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Link {{aud_host}}? · OpenBus</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<meta name="theme-color" content="#EEF0F3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#131518" media="(prefers-color-scheme: dark)">
+<style>
+:root{color-scheme:light dark;--background:#eef0f3;--foreground:#15181c;--card:#fff;--secondary:#f6f7f9;--muted-foreground:#5f6670;--accent:#eceef1;--border:#bec4cd;--divider:#e0e3e8;--input:#848b95;--ring:#2350d0}@media (prefers-color-scheme:dark){:root{--background:#131518;--foreground:#e9ebee;--card:#1c1f23;--secondary:#212429;--muted-foreground:#9097a1;--accent:#181a1e;--border:#3b414a;--divider:#2c3037;--input:#676e78;--ring:#7f9cff}}*,::after,::before{box-sizing:border-box;margin:0;padding:0;border:0 solid var(--divider)}body{min-height:100vh;display:flex;flex-direction:column;background:var(--background);color:var(--foreground);font:15px/1.5 "Geist",system-ui,sans-serif}button{font:inherit;cursor:pointer}svg{display:block;flex:none;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round}.mono{font-family:"Geist Mono",ui-monospace,Menlo,monospace}header{min-height:56px;padding:8px 16px;background:var(--secondary);border-bottom-width:1px;font-weight:600;font-size:16px}header span{margin-left:auto;font-weight:400;font-size:13px;color:var(--muted-foreground);text-align:right;overflow-wrap:anywhere;min-width:0}main{flex:1;padding:40px 16px 72px}main>*{width:100%;max-width:448px;overflow-wrap:anywhere}.client{padding:10px 12px;border-radius:6px;background:var(--secondary);border-width:1px}b{display:block;font-weight:500;color:var(--foreground)}small{display:block;color:var(--muted-foreground);font-size:13px}li{display:flex;gap:8px;padding:12px 0;border-bottom-width:1px}li:before{content:"✓";color:var(--ring)}li.no:before{content:"×";color:var(--muted-foreground)}.who{display:flex;flex-wrap:wrap;gap:4px 8px;font-size:13px;color:var(--muted-foreground);margin:16px 0}.who a{margin-left:auto;color:inherit}.flex{display:flex}.inline-flex{display:inline-flex}.grid{display:grid}.flex-col{flex-direction:column}.items-center{align-items:center}.justify-center{justify-content:center}.justify-end{justify-content:flex-end}.gap-2{gap:8px}.gap-6{gap:24px}.px-4{padding-inline:16px}.px-6{padding-inline:24px}.py-2{padding-block:8px}.py-6{padding-block:24px}.h-9{height:36px}.h-px{height:1px}.w-full{width:100%}.rounded-md{border-radius:6px}.rounded-xl{border-radius:12px}.border{border-width:1px;border-color:var(--border)}.border-input{border-color:var(--input)}.bg-background{background:var(--background)}.bg-card{background:var(--card)}.bg-border{background:var(--divider)}.bg-primary{background:var(--foreground)}.text-primary-foreground{color:var(--background)}.text-muted-foreground{color:var(--muted-foreground)}.shadow-sm{box-shadow:0 1px 3px 0 #0000001a,0 1px 2px -1px #0000001a}.shadow-xs{box-shadow:0 1px 2px 0 #0000000d}.text-sm{font-size:14px;line-height:1.429}.text-xl{font-size:20px;line-height:1.4}.text-center{text-align:center}.leading-none{line-height:1}.font-medium{font-weight:500}.font-semibold{font-weight:600}:focus-visible{outline:2px solid var(--ring);outline-offset:2px}.hover\:bg-primary\/90:hover{background:color-mix(in oklab,var(--foreground) 90%,transparent)}.hover\:bg-accent:hover{background:var(--accent)}@media (prefers-color-scheme:dark){.dark\:bg-input\/30{background:color-mix(in oklab,var(--input) 30%,transparent)}.dark\:hover\:bg-input\/50:hover{background:color-mix(in oklab,var(--input) 50%,transparent)}}@media (max-width:480px){main{padding:24px 16px 48px}[data-slot=button]{flex:1}}
+</style>
+</head>
+<body><header class="flex items-center gap-2"><svg width="22" viewBox="-9.25 0 18.5 18.5" aria-hidden="true"><path d="M0 7.3v-.6M-2.6 11.8l-.5.3M2.6 11.8l.5.3"/><circle cy="10.3" r="2.25"/><circle cy="3.9" r="2"/><circle cx="-5.5" cy="13.5" r="2"/><circle cx="5.5" cy="13.5" r="2"/></svg>OpenBus<span class="mono"><bdi>{{bus_host}}</bdi></span></header><main class="flex items-center justify-center"><form data-slot="card" class="flex flex-col gap-6 rounded-xl border bg-card py-6 shadow-sm" method="post" action="{{form_action}}"><input type="hidden" name="csrf" value="{{csrf_token}}"><div data-slot="card-header" class="grid gap-2 px-6"><div class="client"><b class="mono"><bdi>{{aud}}</bdi></b><small>asked to link to your bus</small></div><h1 data-slot="card-title" class="leading-none font-semibold text-xl">Let <bdi>{{aud_host}}</bdi> verify your agents' cards?</h1><p data-slot="card-description" class="text-sm text-muted-foreground">When one of your agents shows it a card, it can confirm:</p></div><div data-slot="card-content" class="px-6"><div data-slot="separator" role="none" data-orientation="horizontal" class="bg-border h-px w-full"></div><ul><li><p><b>The agent's name, kind and machine</b><small>Signed by your bus, so it can show them as attested.</small></p></li><li><p><b>What the agent says it's doing</b><small>Marked as reported by the agent, never as fact.</small></p></li><li class="no"><p><b>Never your email or namespaces</b><small>It gets an id for you that only it uses.</small></p></li></ul><div class="who">Signed in as <b><bdi>{{user_email}}</bdi></b><a href="{{switch_url}}">Not you?</a></div></div><div data-slot="card-footer" class="flex items-center px-6 gap-2 justify-end"><button data-slot="button" data-variant="outline" class="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 py-2 border border-input bg-background shadow-xs hover:bg-accent dark:bg-input/30 dark:hover:bg-input/50" type="submit" name="decision" value="cancel">Cancel</button><button data-slot="button" data-variant="default" class="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90" type="submit" name="decision" value="allow">Allow</button></div><small class="px-6 text-center">You can unlink it any time in Settings.</small></form></main></body></html>

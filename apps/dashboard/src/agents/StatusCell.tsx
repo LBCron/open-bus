@@ -26,7 +26,7 @@ export function StatusCell({ agent }: { agent: Agent }) {
       </span>
     );
   return (
-    <div className="grid min-w-0 gap-0.5">
+    <div className="grid min-w-0 gap-0.5 max-md:contents">
       <Badge
         variant="outline"
         data-variant="agent-says"
@@ -37,10 +37,10 @@ export function StatusCell({ agent }: { agent: Agent }) {
         {stateLabel(status)}
       </Badge>
       {(statusLabel || statusAt) && (
-        <span className="min-w-0 whitespace-normal [overflow-wrap:anywhere]">
-          {statusLabel}
+        <span className="min-w-0 whitespace-normal [overflow-wrap:anywhere] max-md:basis-full">
+          {statusLabel && <bdi>{statusLabel}</bdi>}
           {statusAt && (
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs whitespace-nowrap text-muted-foreground">
               {statusLabel && " · "}
               {ago(statusAt)}
             </span>
