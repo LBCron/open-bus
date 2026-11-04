@@ -4694,12 +4694,14 @@ reads as joining.
   - a former default name resolves for the grace but is not reserved: a chosen name may take it, and resolution then prefers the live one in the sender's namespace;
   - a former chosen name is unreserved to nobody: a new agent asking for it gets `<name>-2`;
   - resolution order: a name that exists as a former name in the sender's namespace and as a current name in another resolves to the sender's own.
-- **R393c, Client (daemon, IPC, CLI status):** `harnessName` edges, the IPC `rename`, the `renamed` push, a hello `proposed_name` change on a live agent, `syncClaude` rename, the old-hub `agent_up` fallback, gating, and `open-bus status` "(was x)". Tests:
+- **R393c, Client (daemon, IPC, CLI status):** `harnessName` edges, the IPC `rename`, the `renamed` push, a hello `proposed_name` change on a live agent, `syncClaude` rename, the old-hub `agent_up` fallback, gating, `name_kind` (Backend's #416: on `agent_up` and `rename`, sent only to a hub at or above `RENAME_MIN_CLIENT`; absent means `chosen`), and `open-bus status` "(was x)". Tests:
   - a Claude file `name` change sends one `rename`;
   - an unchanged re-read sends none;
+  - **a Claude session resumed with a custom title re-reads the file after hello.** The name is read once today, at hello, so a `--resume` whose title arrives later comes up as Claude's default (`open-bus-e2` for "OB Manager"), and a `/rename` afterwards changes nothing. The daemon must read `sessions/<pid>.json` again after hello, and treat the first read and the later one as an edge only when they differ;
   - a tool rename survives the next sync;
   - a later harness edge overrides it;
   - an old hub gets `agent_up`;
+  - a hub with R393a but not R393b answers `rename` with `error bad_frame`: fall back to `agent_up` for that rename, once;
   - an old adapter gets no `former_names` and no `renamed`;
   - a refusal reaches the caller.
 - **R393d, Client (adapters):** the `rename` tool everywhere; Pi `session_info_changed`; the omp poll; Pi/omp `setSessionName` write-back; OpenCode presence `titles` and the uncached title; receipt, `self` and `list_agents` copy. Tests:
