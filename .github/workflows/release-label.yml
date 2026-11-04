@@ -1,0 +1,75 @@
+name: release-label
+# Label events and pushes on the release PR (#445, docs/ops/releases.md).
+# Every job runs only for this repo's release-please branch, so other PRs
+# skip it and it adds nothing to the merge queue. Each job runs the PR's own
+# checkout of release-label.ts, so the head.ref check keeps statuses:write and
+# pull-requests:write off any other PR's code.
+# - approve: `release-ok` added records a `release-ok` commit status on the
+#   head it was added on; release-cadence arms only a head with that status.
+# - dequeue: `release-hold` added, or `release-ok` removed, takes the release
+#   PR out of the merge queue and disables its auto-merge.
+# - disarm: a push to the release branch (release-please's force-push, made
+#   with the App token so it does trigger this) does the same: the new head
+#   isn't approved.
+# release-cadence is the backstop if any job fails or loses a race.
+# No concurrency group: a later event must never cancel a job.
+on:
+  pull_request:
+    types: [labeled, unlabeled, synchronize]
+permissions: {}
+jobs:
+  approve:
+    if: ${{ github.event.pull_request.head.ref == 'release-please--branches--main--components--open-bus' && github.event.pull_request.head.repo.full_name == github.repository && github.event.action == 'labeled' && github.event.label.name == 'release-ok' }}
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: approve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: node --experimental-strip-types scripts/ci/release-label.ts approve --repo "$GITHUB_REPOSITORY" --pr "$PR" --sha "$SHA"
+  dequeue:
+    if: ${{ github.event.pull_request.head.ref == 'release-please--branches--main--components--open-bus' && github.event.pull_request.head.repo.full_name == github.repository && ((github.event.action == 'labeled' && github.event.label.name == 'release-hold') || (github.event.action == 'unlabeled' && github.event.label.name == 'release-ok')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: dequeue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: node --experimental-strip-types scripts/ci/release-label.ts dequeue --repo "$GITHUB_REPOSITORY" --pr "$PR"
+  disarm:
+    if: ${{ github.event.pull_request.head.ref == 'release-please--branches--main--components--open-bus' && github.event.pull_request.head.repo.full_name == github.repository && github.event.action == 'synchronize' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: disarm
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: node --experimental-strip-types scripts/ci/release-label.ts disarm --repo "$GITHUB_REPOSITORY" --pr "$PR"

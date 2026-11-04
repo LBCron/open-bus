@@ -2,9 +2,12 @@
 // queue has drained, and keep one `blocker` issue open while a release is stuck.
 // Usage: node --experimental-strip-types scripts/ci/release-cadence.ts <plan|arm|blocker> --repo owner/name
 // `plan` prints `write=true|false` (does arm need the App token?).
-// Opt-in (#435): only a release PR labeled `release-ok` is armed, and a
-// `release-hold` label still stops it. `arm` re-reads the labels right before
-// it enqueues, so a change mid-run wins.
+// Opt-in (#435): only a release PR labeled `release-ok` whose head carries
+// the workflow's `release-ok` status is armed (#445), and a `release-hold`
+// label still stops it. `arm` re-reads the labels right before it enqueues,
+// so a change mid-run wins. A release that is held or lost its approval is
+// taken back, whoever armed it: disarmed, and dequeued if queued. This is the
+// backstop for release-label.yml's dequeue/disarm jobs.
 // Needs GH_TOKEN in the environment. `arm` runs with the release App's token
 // (so the merge triggers workflows); `blocker` runs with GITHUB_TOKEN.
 import { spawnSync } from "node:child_process";
@@ -20,6 +23,20 @@ export const DRAIN_CAP_MS = 30 * 60_000;
 export const HOLD_LABEL = "release-hold";
 /** The cadence arms the release PR only with this label (#435): a person decides a release ships. */
 export const OK_LABEL = "release-ok";
+/**
+ * The commit status that ties an approval to one head (#445). release-label.yml
+ * sets it on the head `release-ok` was added on; a later push makes a new head
+ * without it, so the cadence waits for a fresh approval.
+ */
+export const APPROVAL_CONTEXT = "release-ok";
+/**
+ * Only a status created by this login approves (#445 review): the
+ * release-label workflow's GITHUB_TOKEN. Any other token with statuses:write
+ * could forge the context. Compared without a `[bot]` suffix.
+ */
+export const APPROVAL_CREATOR = "github-actions";
+/** A release PR waiting for approval gets a gentle `blocker` reminder after this long. */
+export const APPROVAL_REMINDER_MS = 3 * DAY_MS;
 
 export type ExecResult = { code: number; stdout: string; stderr: string };
 export type Exec = (
@@ -27,10 +44,12 @@ export type Exec = (
   args: string[],
 ) => ExecResult | Promise<ExecResult>;
 
-const QUERY = `query($owner: String!, $name: String!, $head: String!, $branch: String!) {
+export const QUERY = `query($owner: String!, $name: String!, $head: String!, $branch: String!) {
   repository(owner: $owner, name: $name) {
-    pullRequests(states: OPEN, headRefName: $head, first: 1) {
+    pullRequests(states: OPEN, headRefName: $head, first: 10) {
       nodes {
+        id
+        isCrossRepository
         number
         url
         title
@@ -44,11 +63,13 @@ const QUERY = `query($owner: String!, $name: String!, $head: String!, $branch: S
               oid
               statusCheckRollup {
                 state
+                # Past 100 checks the approval status may be cut off: that
+                # fails safe, holding a release rather than shipping one.
                 contexts(first: 100) {
                   nodes {
                     __typename
                     ... on CheckRun { name conclusion status detailsUrl completedAt }
-                    ... on StatusContext { context state targetUrl createdAt }
+                    ... on StatusContext { context state targetUrl createdAt creator { login } }
                   }
                 }
               }
@@ -76,8 +97,11 @@ type Context = {
   targetUrl?: string;
   completedAt?: string | null;
   createdAt?: string | null;
+  creator?: { login?: string } | null;
 };
 export type ReleasePr = {
+  /** GraphQL node id, for dequeuePullRequest. */
+  id: string;
   number: number;
   url: string;
   title: string;
@@ -87,6 +111,8 @@ export type ReleasePr = {
   armedBy?: string;
   /** Carries the release-ok label (#435). */
   ok: boolean;
+  /** The head commit carries a success `release-ok` status (#445): the label was added on this head. */
+  approved: boolean;
   /** Carries the release-hold label. */
   held: boolean;
   rollup: string;
@@ -123,7 +149,10 @@ async function snapshot(exec: Exec, repo: string): Promise<Snapshot> {
     "branch=main",
   ]);
   const repository = JSON.parse(out)?.data?.repository;
-  const n = repository?.pullRequests?.nodes?.[0];
+  // A fork can open a PR from a branch with the same name: only ours counts.
+  const n = (repository?.pullRequests?.nodes ?? []).find(
+    (p: { isCrossRepository?: unknown }) => p?.isCrossRepository === false,
+  );
   const entries: { pullRequest?: { headRefName?: string } }[] =
     repository?.mergeQueue?.entries?.nodes ?? [];
   const others = entries.filter(
@@ -140,6 +169,7 @@ async function snapshot(exec: Exec, repo: string): Promise<Snapshot> {
   return {
     others,
     pr: {
+      id: String(n.id ?? ""),
       number: n.number,
       url: n.url,
       title: n.title,
@@ -152,6 +182,13 @@ async function snapshot(exec: Exec, repo: string): Promise<Snapshot> {
       ),
       ok: (n.labels?.nodes ?? []).some(
         (l: { name?: string }) => l.name === OK_LABEL,
+      ),
+      approved: contexts.some(
+        (c) =>
+          c.__typename === "StatusContext" &&
+          c.context === APPROVAL_CONTEXT &&
+          c.state === "SUCCESS" &&
+          bare(c.creator?.login) === APPROVAL_CREATOR,
       ),
       rollup: rollup?.state ?? "NONE",
       contexts,
@@ -169,6 +206,7 @@ export type ArmResult =
   | { action: "held"; pr: number }
   | { action: "not-ok"; pr: number }
   | { action: "disarmed"; pr: number }
+  | { action: "dequeued"; pr: number }
   | { action: "armed"; pr: number };
 
 type Opts = {
@@ -176,15 +214,80 @@ type Opts = {
   repo: string;
   now?: () => number;
   capMs?: number;
-  /** The release App's bot login; only auto-merge it enabled is ever disabled. */
+  /** The release App's bot login: the drain rule only re-checks an arm it set. A hold or lost approval disarms any arm. */
   appLogin?: string;
 };
 type Plan =
   | { do: "none"; result: ArmResult; msg: string }
   | { do: "disarm"; pr: ReleasePr }
+  | { do: "stop"; pr: ReleasePr }
   | { do: "arm"; pr: ReleasePr; capHit: boolean };
 
 const bare = (l?: string) => String(l ?? "").replace(/\[bot\]$/, "");
+
+const STATE_QUERY =
+  "query($id: ID!) { node(id: $id) { ... on PullRequest { isInMergeQueue autoMergeRequest { enabledAt } } } }";
+
+/** Reads whether the PR is queued and armed. An unexpected reply throws: it must never read as "not queued". */
+async function mergeState(
+  exec: Exec,
+  id: string,
+): Promise<{ queued: boolean; armed: boolean }> {
+  const out = await gh(exec, [
+    "api",
+    "graphql",
+    "-f",
+    `query=${STATE_QUERY}`,
+    "-f",
+    `id=${id}`,
+  ]);
+  const node = JSON.parse(out)?.data?.node;
+  if (
+    !node ||
+    typeof node.isInMergeQueue !== "boolean" ||
+    !("autoMergeRequest" in node)
+  )
+    throw new Error(`unexpected merge-queue state for ${id}: ${out.trim()}`);
+  return { queued: node.isInMergeQueue, armed: node.autoMergeRequest != null };
+}
+
+export type Stopped = { dequeued: boolean; disarmed: boolean };
+
+/**
+ * Takes a release PR back: dequeues it if queued, then disables auto-merge
+ * if it is still set (whoever armed it), so GitHub can't enqueue it again.
+ */
+export async function stopRelease(o: {
+  exec: Exec;
+  repo: string;
+  id: string;
+  number: number;
+}): Promise<Stopped> {
+  let s = await mergeState(o.exec, o.id);
+  let dequeued = false;
+  if (s.queued) {
+    await gh(o.exec, [
+      "api",
+      "graphql",
+      "-f",
+      "query=mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }",
+      "-f",
+      `id=${o.id}`,
+    ]);
+    dequeued = true;
+    s = await mergeState(o.exec, o.id);
+  }
+  if (!s.armed) return { dequeued, disarmed: false };
+  await gh(o.exec, [
+    "pr",
+    "merge",
+    String(o.number),
+    "--disable-auto",
+    "--repo",
+    o.repo,
+  ]);
+  return { dequeued, disarmed: true };
+}
 
 function plan(
   s: Snapshot,
@@ -203,6 +306,10 @@ function plan(
     pr.rollup === "SUCCESS" &&
     pr.settledAt !== undefined &&
     now - pr.settledAt >= capMs;
+  const blocked = pr.held || !pr.ok || !pr.approved;
+  // Held, or no approval on this head (a push since it was armed, say):
+  // take it out of the queue. The backstop for release-label.yml (#445 review).
+  if (pr.queued && blocked) return { do: "stop", pr };
   if (pr.queued)
     return {
       do: "none",
@@ -210,23 +317,24 @@ function plan(
       msg: `release PR #${pr.number} is already queued`,
     };
   if (pr.held) {
-    // A hold also takes back an arm the App already set, while it is not queued.
-    const ours = Boolean(appLogin) && bare(pr.armedBy) === bare(appLogin);
-    if (pr.armed && ours) return { do: "disarm", pr };
+    // A hold takes back any arm, the App's or a person's.
+    if (pr.armed) return { do: "disarm", pr };
     return {
       do: "none",
       result: { action: "held", pr: pr.number },
       msg: `release PR #${pr.number} has the ${HOLD_LABEL} label, not arming`,
     };
   }
-  if (!pr.ok) {
-    // Opt-in (#435): without release-ok, take back an arm the App set.
-    const ours = Boolean(appLogin) && bare(pr.armedBy) === bare(appLogin);
-    if (pr.armed && ours) return { do: "disarm", pr };
+  if (!pr.ok || !pr.approved) {
+    // Opt-in (#435), tied to the head (#445): without release-ok on this exact
+    // head, take back any arm, a person's too (#445 review).
+    if (pr.armed) return { do: "disarm", pr };
     return {
       do: "none",
       result: { action: "not-ok", pr: pr.number },
-      msg: `release PR #${pr.number} has no ${OK_LABEL} label, not arming`,
+      msg: !pr.ok
+        ? `release PR #${pr.number} has no ${OK_LABEL} label, not arming`
+        : `release PR #${pr.number}: ${OK_LABEL} was added on an older head; remove and re-add it to approve ${pr.oid.slice(0, 7)}`,
     };
   }
   if (pr.armed) {
@@ -279,6 +387,23 @@ export async function arm(
     o.log(p.msg);
     return p.result;
   }
+  if (p.do === "stop") {
+    const r = await stopRelease({
+      exec: o.exec,
+      repo: o.repo,
+      id: p.pr.id,
+      number: p.pr.number,
+    });
+    const why = p.pr.held
+      ? `it has the ${HOLD_LABEL} label`
+      : !p.pr.ok
+        ? `it has no ${OK_LABEL} label`
+        : `its head ${p.pr.oid.slice(0, 7)} has no ${OK_LABEL} approval`;
+    o.log(
+      `took release PR #${p.pr.number} out of the merge queue${r.disarmed ? " and disabled auto-merge" : ""}: ${why}`,
+    );
+    return { action: "dequeued", pr: p.pr.number };
+  }
   if (p.do === "disarm") {
     await gh(o.exec, [
       "pr",
@@ -293,7 +418,9 @@ export async function arm(
         ? `disabled auto-merge on release PR #${p.pr.number}: it has the ${HOLD_LABEL} label`
         : !p.pr.ok
           ? `disabled auto-merge on release PR #${p.pr.number}: it has no ${OK_LABEL} label`
-          : `disabled auto-merge on release PR #${p.pr.number} to re-check the drain on its current head`,
+          : !p.pr.approved
+            ? `disabled auto-merge on release PR #${p.pr.number}: its head has no ${OK_LABEL} approval`
+            : `disabled auto-merge on release PR #${p.pr.number} to re-check the drain on its current head`,
     );
     return { action: "disarmed", pr: p.pr.number };
   }
@@ -423,8 +550,12 @@ export async function blocker(o: {
 
   if (pr) {
     const bad = pr.rollup === "FAILURE" || pr.rollup === "ERROR";
-    // Waiting for release-ok (#435) is a person's choice, not a stuck release.
-    const old = pr.ok && o.now() - Date.parse(pr.createdAt) > DAY_MS;
+    // Waiting for release-ok (#435) is a person's choice, not a stuck release:
+    // an approved one is stuck after 24 h, an unapproved one gets a gentle
+    // reminder after APPROVAL_REMINDER_MS (#445).
+    const live = pr.ok && pr.approved;
+    const age = o.now() - Date.parse(pr.createdAt);
+    const old = live ? age > DAY_MS : age > APPROVAL_REMINDER_MS;
     if (!bad && !old)
       return closed.length
         ? { action: "closed", issues: closed }
@@ -432,7 +563,11 @@ export async function blocker(o: {
     const reasons = [
       ...(bad ? [`release PR #${pr.number} has failing checks`] : []),
       ...(old
-        ? [`release PR #${pr.number} has been open for over 24 hours`]
+        ? [
+            live
+              ? `release PR #${pr.number} has been open for over 24 hours`
+              : `release PR #${pr.number} has waited over 3 days for ${OK_LABEL} on its current head (every release-please push needs ${OK_LABEL} removed and added again)`,
+          ]
         : []),
     ];
     const lines = [

@@ -2,36 +2,72 @@
 
 release-please keeps one release PR open on `main`. The `release-cadence`
 workflow (`scripts/ci/release-cadence.ts`) arms it with auto-merge once it
-carries the `release-ok` label, its checks are green, and the merge queue holds
-nothing but release PRs (or it has been green for 30 minutes). The merge publishes `@open-bus/cli` to npm and
+carries the `release-ok` label with an approval for its current head, its
+checks are green, and the merge queue holds nothing but release PRs (or it has
+been green for 30 minutes). The merge publishes `@open-bus/cli` to npm and
 upgrades prod from CI (`deploy-prod`, then `verify-release`).
 
 ## Approving a release
 
-Releases ship only when a person approves them (#435). The cadence arms the
-release PR only once it carries the `release-ok` label:
+Releases ship only when a person approves them, and an approval covers one
+exact head (#435, #445). Add the `release-ok` label to the release PR:
 
     gh pr edit <release PR> --add-label release-ok
 
-Without it:
+`release-label.yml` then records a `release-ok` commit status on the head the
+label was added on. The cadence arms the PR only when it carries the label
+**and** its current head carries that status, created by `github-actions`
+(the workflow's token), pinned with `--match-head-commit`. release-please
+force-pushes the same PR whenever main changes; the new head has no status,
+so the old approval no longer counts. To approve the new head, remove the
+label and add it again. If a push lands between adding the label and the job,
+the job approves nothing; add it again.
 
-- `plan` does not arm the PR, and logs that it has no `release-ok` label.
-- `arm` re-reads the labels right before it enqueues, so taking the label off
-  during a run still wins.
-- If the cadence already armed the PR and it is not yet in the queue, the next
-  run disables auto-merge. It never touches an arm a person set.
-- An unapproved release PR doesn't get the 24-hour `blocker` issue: waiting for
-  approval isn't stuck. Failing checks still open one.
+Every job in `release-label.yml` runs only for this repo's release-please
+branch (`head.ref` and same repo), because each one runs the PR's own copy of
+`release-label.ts` with a write token.
 
-Once the PR is in the merge queue, removing `release-ok` doesn't take it out.
-Remove it from the queue in GitHub instead. Arming the release PR by hand
-still works at any time.
+Without an approval on the current head, or with a hold:
+
+- `plan` does not arm the PR, and logs which is missing (the label, or an
+  approval for this head).
+- `arm` re-reads the labels right before it enqueues.
+- Any arm is taken back, whoever set it: a person's too. If the PR is not
+  queued, the next run disables auto-merge. If it is queued, the next run
+  dequeues it and disables auto-merge.
+- A push to the release branch runs the `disarm` job, which does the same at
+  once: auto-merge set on the old head would otherwise enqueue the new one.
+- No 24-hour `blocker` issue: waiting for approval isn't stuck. After 3 days a
+  gentle `blocker` reminder opens. Failing checks still open one.
+
+Arming the release PR by hand still skips the label, but no longer survives
+it: while the head is unapproved or held, the cadence and these jobs take the
+arm back. To ship by hand, approve the head first.
+
+### Trust boundary
+
+The approval is as strong as repo write access. Anyone with write can add
+`release-ok`. The creator check only rejects a `release-ok` status written by
+a token other than GitHub Actions'; every workflow in the repo runs as
+`github-actions`, so any workflow could still write one. A status with the
+right context but another creator doesn't approve.
 
 ## Holding a release
 
-The `release-hold` label still stops the cadence, even with `release-ok` on:
-`plan` doesn't arm the PR, `arm` re-checks it right before enqueueing, and an
-arm the cadence set (not yet queued) is disabled. Remove it to release:
+The `release-hold` label stops the cadence even with `release-ok` on. Adding
+it, or removing `release-ok`, runs the `dequeue` job in `release-label.yml`:
+it takes the release PR out of the merge queue if it's queued, and disables
+auto-merge whoever set it, so GitHub can't enqueue it again once it's green.
+
+- The job dequeues with `GITHUB_TOKEN`; that hasn't been exercised live. If
+  GitHub refuses it, the job fails, and the cadence's next run (every 15
+  minutes, App token) dequeues and disarms instead. Or remove the PR from the
+  queue in GitHub by hand.
+- A label added by another workflow with `GITHUB_TOKEN` triggers no workflow,
+  so `release-label.yml` never sees that hold. The cadence still does, on
+  its next run.
+
+Remove the hold to release:
 
     gh pr edit <release PR> --remove-label release-hold
 
