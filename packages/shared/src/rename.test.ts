@@ -85,16 +85,16 @@ describe("rename / renamed frames (R393a)", () => {
     expect(decodeServerFrame(JSON.stringify(f)).ok).toBe(true);
   });
 
-  it("refuses a renamed whose former is its own bus_name", () => {
+  it("decodes a case-only rename (Beta -> beta)", () => {
     const f = {
       v: 1,
       id,
       type: "renamed",
       agent_ref: "s1",
-      bus_name: "a",
-      former: "a",
+      bus_name: "beta",
+      former: "Beta",
     };
-    expect(decodeServerFrame(JSON.stringify(f)).ok).toBe(false);
+    expect(decodeServerFrame(JSON.stringify(f)).ok).toBe(true);
   });
 
   it("bounds proposed_name like agent_up, and rejects an empty or extra field", () => {
@@ -137,20 +137,33 @@ describe("roster former_names (R393a)", () => {
     expect(FormerNamesSchema.safeParse(six).success).toBe(false);
   });
 
-  it("rejects out-of-order, duplicate, current or malformed entries", () => {
+  it("rejects malformed entries", () => {
     const bad: unknown[] = [
-      [five[1], five[0]], // oldest first
-      [five[0], { ...five[1], name: five[0].name }], // duplicate name
-      [{ name: "beta", expires_at: at(1) }], // the row's own bus_name
       [{ name: "openbus", expires_at: at(1) }], // reserved
       [{ name: "a", expires_at: "soon" }],
       [{ name: "a", expires_at: at(1), extra: 1 }],
+      [{ name: "a" }],
       [],
     ];
     for (const b of bad)
       expect(decodeServerFrame(roster([row(b)])).ok, JSON.stringify(b)).toBe(
         false,
       );
+  });
+
+  it("leaves hub invariants to the hub: one bad row never fails a roster", () => {
+    // Order, case-insensitive distinctness and != bus_name are pinned by the
+    // hub's tests (R393b), not the decoder.
+    const lax: unknown[] = [
+      [five[1], five[0]], // oldest first
+      [five[0], { ...five[1], name: "OLD-0" }], // duplicate ignoring case
+      [{ name: "Beta", expires_at: at(1) }], // the row's bus_name, other case
+    ];
+    for (const b of lax)
+      expect(
+        decodeServerFrame(roster([row(), row(b)])).ok,
+        JSON.stringify(b),
+      ).toBe(true);
   });
 });
 

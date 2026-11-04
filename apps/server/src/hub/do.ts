@@ -2475,6 +2475,11 @@ export class Hub extends DurableObject<Env> {
         return sender
           ? this.#card(ws, machineId, machine.label, f, sender)
           : undefined;
+      case "rename":
+        // Decoded since R393a, handled from R393b (#393). Answer, never drop:
+        // a daemon waits on `renamed` and falls back on an error.
+        reject(ws, machineId, f.id, "bad_frame", "rename is not supported yet");
+        return;
     }
   }
 

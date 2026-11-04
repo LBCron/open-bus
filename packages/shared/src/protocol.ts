@@ -200,19 +200,18 @@ const AgentOk = z.strictObject({
   bus_name: BusNameSchema,
 });
 
-/** The reply to `rename`. `former` is the name left; absent on a no-op. */
-const Renamed = z
-  .strictObject({
-    ...base,
-    type: z.literal("renamed"),
-    agent_ref: AgentRefSchema,
-    bus_name: BusNameSchema,
-    former: BusNameSchema.optional(),
-  })
-  .refine(
-    (f) => f.former?.toLowerCase() !== f.bus_name.toLowerCase(),
-    "former equals bus_name",
-  );
+/**
+ * The reply to `rename`. `former` is the name left; absent on a no-op. Names
+ * compare case-insensitively (as the hub's `lname`): a case-only change is a
+ * rename, and the hub never sends a `former` equal to `bus_name` ignoring case.
+ */
+const Renamed = z.strictObject({
+  ...base,
+  type: z.literal("renamed"),
+  agent_ref: AgentRefSchema,
+  bus_name: BusNameSchema,
+  former: BusNameSchema.optional(),
+});
 
 /** The reply to `send`: only `pending` or `refused`, never a false `delivered`. */
 const ReceiptFrame = z
@@ -259,17 +258,7 @@ export const rosterState = (a: {
 const Roster = z.strictObject({
   ...base,
   type: z.literal("roster"),
-  agents: z
-    .array(
-      RosterAgent.refine(
-        (a) =>
-          !a.former_names?.some(
-            (f) => f.name.toLowerCase() === a.bus_name.toLowerCase(),
-          ),
-        "former name equals bus_name",
-      ),
-    )
-    .max(LIMITS.maxRosterAgents),
+  agents: z.array(RosterAgent).max(LIMITS.maxRosterAgents),
 });
 
 const BodyFrame = z.strictObject({
@@ -491,8 +480,8 @@ export const MAX_RAW_FRAME_CHARS = 2 * LIMITS.maxMessageBytes + 4096;
  *
  * Server frames (daemon side) carry the roster. Its worst row (card fields
  * plus LIMITS.maxFormerNames `former_names` entries, #393) nests 5 deep and
- * uses about 40 tokens and 90 structural characters, so a full 1000-agent
- * roster is about 40000 and 90000: 65536 and 131072 leave ~1.5x headroom.
+ * uses about 41 tokens and 95 structural characters, so a full 1000-agent
+ * roster is about 41000 and 95000: 65536 and 131072 leave ~1.6x and ~1.4x.
  */
 type ScanCaps = { depth: number; tokens: number; structural: number };
 const CLIENT_CAPS: ScanCaps = { depth: 4, tokens: 16384, structural: 65536 };

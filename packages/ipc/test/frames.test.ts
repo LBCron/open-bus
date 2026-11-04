@@ -324,13 +324,12 @@ describe("AgentInfo former_names (#393, R393a)", () => {
     expect(AgentInfo.parse(five)).toEqual(five);
   });
 
-  it("rejects over 5, or oldest first", () => {
+  it("rejects over 5, or none", () => {
     expect(
       AgentInfo.safeParse({ ...info, former_names: names(6) }).success,
     ).toBe(false);
-    expect(
-      AgentInfo.safeParse({ ...info, former_names: names(2).reverse() })
-        .success,
-    ).toBe(false);
+    expect(AgentInfo.safeParse({ ...info, former_names: [] }).success).toBe(
+      false,
+    );
   });
 });
