@@ -96,6 +96,13 @@ export async function daemonHarness(over: Partial<DaemonDeps> = {}) {
     resolveNamespace: () => ({ namespace: "ns", global: false, source: "cwd" }),
     hub: { backoffMs: () => 20 },
     sentFile: join(mkdtempSync(join(tmpdir(), "ob-sf-")), "sent.json"),
+    // Never the real ~/.openbus: the hub's version and the names a rename
+    // chose live in temp files (#430).
+    hubVersionFile: join(
+      mkdtempSync(join(tmpdir(), "ob-hv-")),
+      "hub-version.json",
+    ),
+    namesFile: join(mkdtempSync(join(tmpdir(), "ob-nm-")), "names.json"),
     // A queued send answers at once unless a test waits for delivered (C17).
     deliveredWaitMs: 0,
     ...over,

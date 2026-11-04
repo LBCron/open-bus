@@ -8,7 +8,11 @@ export type AgentRecord = {
   proposedName: string;
   /** Whose name `proposedName` is: a harness fallback or something chosen. Absent: chosen. */
   nameKind?: NameKind;
-  /** The last name the harness itself reported (#393). A change is a rename; the same value is not. */
+  /**
+   * The last name the harness itself reported (#393). A change is a rename;
+   * the same value is not. A tool rename writes the name back into a Pi or
+   * omp session, so it moves this too (#430).
+   */
   harnessName?: string;
   busName: string;
   namespace: string;

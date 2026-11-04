@@ -4623,7 +4623,8 @@ Reading harness state as a level would undo every tool rename within 2 s. On
 Pi/omp the tool also calls `setSessionName(name)`, so the session and the bus
 agree, and the event it fires repeats the same name (a no-op). Claude, OpenCode
 and Codex get no write-back. Daemon state is in memory, so a daemon restart
-re-announces the harness name.
+re-announces the harness name — except a name the hub accepted for a tool
+rename, which is kept on disk (#430).
 
 ### Wire (Backend: shared + hub; Client: IPC)
 
