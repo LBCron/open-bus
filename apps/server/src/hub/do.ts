@@ -747,13 +747,15 @@ function leaveNames(
  * LIMITS.formerNameGraceMs, as a `held` former_names row: reserved there
  * (nameTaken), never resolving (liveFormer and the roster skip it, even
  * for a live agent back in that scope under another name), counted as a
- * reservation for ambiguity (heldElsewhere) and in formerRoom. It replaces
+ * reservation for ambiguity (heldElsewhere), but not in formerRoom (they
+ * are bounded by the rename limit instead). It replaces
  * the agent's row for that name and scope (a chosen one a -2 move just
  * left). Its own agent takes it back by taking the name there again
- * (nameTaken skips its own rows; commitName drops the row). At most
- * LIMITS.maxFormerNames held rows per agent: past it the oldest goes, so a
- * session hopping namespaces under one name stores a bounded set. `ids` is
- * a JSON array. Returns the holds' end.
+ * (nameTaken skips its own rows; commitName drops the row). A hold is never
+ * dropped before its hour: an agent holds at most one per scope change plus
+ * one per close, and agentUp counts every scope change in rename_rl, so
+ * holds are bounded by the hourly limit. `ids` is a JSON array. Returns the
+ * holds' end.
  */
 function holdNames(sql: SqlStorage, ids: string, now: number): number {
   const expires = now + LIMITS.formerNameGraceMs;
@@ -771,15 +773,6 @@ function holdNames(sql: SqlStorage, ids: string, now: number): number {
       where id in (select value from json_each(?))`,
     expires,
     ids,
-  );
-  sql.exec(
-    `delete from former_names where rowid in
-       (select rowid from (select rowid, row_number() over
-           (partition by agent_id order by expires_at desc, rowid desc) as k
-          from former_names where agent_id in (select value from json_each(?)) and kind = 'held')
-        where k > ?)`,
-    ids,
-    LIMITS.maxFormerNames,
   );
   return expires;
 }
@@ -994,7 +987,9 @@ function mintedFor(
  * (not counting the two names involved: the new one's own row in its scope
  * goes, the old one's in its scope is replaced) a change that leaves another
  * chosen row is refused. #451: rows left in another scope by a move or flip
- * count too, held names included: they still hold reservations. A case-only change in one scope
+ * count too: they still hold reservations. Held names (holdNames) do not:
+ * the rename limit bounds them, and a same-name move must not block an
+ * in-place rename for an hour. A case-only change in one scope
  * or a minted (default) former name always has room.
  */
 function formerRoom(
@@ -1014,7 +1009,7 @@ function formerRoom(
     one<{ n: number }>(
       sql,
       `select count(*) as n from former_names indexed by former_names_agent
-        where agent_id = ? and expires_at > ? and kind in ('chosen', 'held')
+        where agent_id = ? and expires_at > ? and kind = 'chosen'
           and not (lname = ? and global = ? and (global = 1 or namespace = ?))
           and not (lname = ? and global = ? and (global = 1 or namespace = ?))`,
       agentId,
@@ -1117,7 +1112,8 @@ function recordRename(
  * former names reserved in the old scope (keepScopedNames), still counting
  * in formerRoom, and (user decision 2026-11-04) holds its current name there
  * for the grace (holdNames), whether the name changes (a rename, a -2, or a
- * rename_kept -2) or not. A same-name move counts nothing.
+ * rename_kept -2) or not. Every scope change counts once in rename_rl
+ * (a same-name one too); at the limit it is kept (`move_kept`, below).
  *
  * #449 N1: a reopen (the agent was closed) under a new name counts too, so
  * close and reopen is no way around the limit, but leaves no former name:
@@ -1129,7 +1125,7 @@ function recordRename(
 function agentUp(
   sql: SqlStorage,
   machineId: string,
-  f: AgentUpFrame,
+  frame: AgentUpFrame,
   now: number,
 ): {
   reply: ServerFrame;
@@ -1148,10 +1144,33 @@ function agentUp(
     sql,
     "select id, namespace, name, kind, live, global from agents where machine_id = ? and native_ref = ? and org_id = ?",
     machineId,
-    f.agent_ref,
+    frame.agent_ref,
     OWNER_ORG_ID,
   );
   const id = existing?.id ?? newId();
+  // #451 review: every scope change (a namespace move or global flip, live
+  // or on a reopen, same name or not) counts in rename_rl, which bounds the
+  // names an agent can hold (holdNames) to the hourly limit. At the limit
+  // the agent_up still succeeds (it must never fail) but keeps the agent in
+  // its current scope under its current name, logged as `move_kept`; the
+  // daemon is not told (agent_ok carries no namespace).
+  const moves =
+    existing !== null &&
+    (existing.global !== (frame.global ? 1 : 0) ||
+      (!frame.global && existing.namespace !== frame.namespace));
+  const f: AgentUpFrame =
+    existing && moves && !renameAllowed(sql, existing.id, now)
+      ? {
+          ...frame,
+          namespace: existing.namespace,
+          global: existing.global === 1,
+          proposed_name: existing.name,
+          name_kind: undefined,
+        }
+      : frame;
+  if (f !== frame)
+    logEvent("move_kept", { machineId, reopen: existing?.live !== 1 });
+  let counted = false;
   let assigned = assignName(
     sql,
     f.namespace,
@@ -1188,6 +1207,7 @@ function agentUp(
       (!former ||
         formerRoom(sql, id, existing.name, from, assigned.name, to, now))
     ) {
+      counted = true;
       if (former)
         armAt = recordRename(
           sql,
@@ -1210,6 +1230,8 @@ function agentUp(
     }
   }
   const name = assigned.name;
+  if (existing && !sameScope && !counted)
+    sql.exec("insert into rename_rl (agent_id, at) values (?, ?)", id, now);
   // #451: a live agent leaving its scope holds its current name there,
   // read from its row before the update below rewrites it.
   if (wasLive && !sameScope) armAt = holdNames(sql, JSON.stringify([id]), now);

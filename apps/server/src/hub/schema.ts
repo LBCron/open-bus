@@ -186,8 +186,8 @@ create index if not exists card_rl_at on card_rl(at);
 -- are purged on read and by the alarm. Never equal (case-insensitively) to
 -- the agent's current name in its scope, distinct per agent and scope
 -- (lname), at most LIMITS.maxFormerNames non-held rows per agent (#446: an
--- older default one is dropped) and LIMITS.maxFormerNames held ones (the
--- oldest dropped).
+-- older default one is dropped). Held rows are never dropped early; every
+-- scope change counts in rename_rl, which bounds them.
 -- #451: namespace and global are the scope the name was left in (added by
 -- migrateHub on an older hub). A row resolves only while its agent is still
 -- in that scope; after a namespace move or global flip a chosen row stays,

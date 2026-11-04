@@ -1067,14 +1067,14 @@ describe("#449: review of #446", () => {
     d.close();
   });
 
-  it("an agent_up namespace move at the limit moves, keeping the current name", async () => {
+  it("an agent_up namespace move at the limit is kept in its scope and name (move_kept, #451 review)", async () => {
     const d = await at();
     const n1 = ns("rn");
     const n2 = ns("rn");
     await reg(d, "a", uniq("Mover"), n1);
     const cur = await churn(d, "a", LIMITS.renamesPerHour);
     expect(await reg(d, "a", uniq("Elsewhere"), n2)).toBe(cur);
-    // #451: its chosen former names stay, reserved in n1.
+    // Nothing moved: its former names are where they were.
     expect(await formerRows(cur)).toHaveLength(2);
     const ns2 = await inHub(
       (_, st) =>
@@ -1082,7 +1082,7 @@ describe("#449: review of #446", () => {
           .exec("select namespace from agents where name = ? and live = 1", cur)
           .one().namespace,
     );
-    expect(ns2).toBe(n2);
+    expect(ns2).toBe(n1);
     d.close();
   });
 
@@ -1285,8 +1285,8 @@ describe("#451: a move or global flip keeps chosen former names reserved", () =>
     }
     left.pop();
     expect(await reg(d, "a", cur, n2)).toBe(cur);
-    // The move counts nothing (the name did not change)...
-    expect(await log(cur)).toBe(LIMITS.maxFormerNames);
+    // The move counts once (#451 review: every scope change counts)...
+    expect(await log(cur)).toBe(LIMITS.maxFormerNames + 1);
     // ...and the five reservations still fill the room.
     expect(await rename(d, "a", uniq("Sixth"))).toMatchObject({
       type: "error",
@@ -1693,13 +1693,17 @@ describe("#451: a session leaving a namespace holds its name there for 1 h", () 
     d.close();
   });
 
-  it("a -2 move at the rename limit (rename_kept) holds the old name too", async () => {
+  it("a -2 move with no room (rename_kept) holds the old name too", async () => {
     const d = await at();
     const n1 = ns("lv");
     const n2 = ns("lv");
     await reg(d, "s1", uniq("Sender"), n1);
     await reg(d, "a", uniq("Lim"), n1);
-    const cur = await churn(d, "a", LIMITS.renamesPerHour);
+    let cur = "";
+    for (let i = 0; i < LIMITS.maxFormerNames; i++) {
+      cur = uniq(`R${i}`);
+      await renamed(d, "a", cur);
+    }
     expect(await reg(d, "c", cur, n2)).toBe(cur);
     expect(await reg(d, "a", cur, n2)).toBe(`${cur}-2`);
     expect(await reg(d, "x", cur, n1)).toBe(`${cur}-2`);
@@ -1784,7 +1788,7 @@ describe("#451: a session leaving a namespace holds its name there for 1 h", () 
     d.close();
   });
 
-  it("held rows count in the room and are capped at maxFormerNames per agent, the oldest going first", async () => {
+  it("no hold is dropped before its hour, and holds never fill the room", async () => {
     const d = await at();
     const mine = uniq("Hop");
     const spaces = Array.from({ length: LIMITS.maxFormerNames + 2 }, () =>
@@ -1793,20 +1797,83 @@ describe("#451: a session leaving a namespace holds its name there for 1 h", () 
     await reg(d, "a", mine, spaces[0] as string);
     for (const s of spaces.slice(1))
       expect(await reg(d, "a", mine, s)).toBe(mine);
-    const held = await holds(mine);
-    expect(held).toEqual(
-      spaces
-        .slice(1, -1)
-        .slice(-LIMITS.maxFormerNames)
-        .map((s) => `${s}/0`),
+    expect(await holds(mine)).toEqual(spaces.slice(0, -1).map((s) => `${s}/0`));
+    for (const s of spaces.slice(0, -1))
+      expect(await reg(d, id("x"), mine, s)).toBe(`${mine}-2`);
+    // Holds are bounded by the rename limit, not the room: an in-place
+    // rename still works.
+    const next = uniq("Next");
+    expect((await renamed(d, "a", next)).bus_name).toBe(next);
+    d.close();
+  });
+
+  it("the 11th scope change in an hour is kept: the agent stays reachable in its old scope (move_kept)", async () => {
+    const t0 = Date.now() + 160 * GRACE;
+    await setClock(t0);
+    const d = await at();
+    const mine = uniq("Hop");
+    const spaces = Array.from({ length: LIMITS.renamesPerHour + 2 }, () =>
+      ns("lv"),
     );
-    expect(await reg(d, "x", mine, spaces[0] as string)).toBe(mine);
-    expect(await reg(d, "y", mine, spaces[2] as string)).toBe(`${mine}-2`);
-    expect(await rename(d, "a", uniq("Sixth"))).toMatchObject({
-      type: "error",
-      code: "rate_limited",
-      message: RENAME_MESSAGES.room,
+    await reg(d, "a", mine, spaces[0] as string);
+    for (const s of spaces.slice(1, -1))
+      expect(await reg(d, "a", mine, s)).toBe(mine);
+    const last = spaces[spaces.length - 2] as string;
+    const beyond = spaces[spaces.length - 1] as string;
+    await reg(d, "s", uniq("Sender"), last);
+    await reg(d, "t", uniq("Sender"), beyond);
+    // Kept: agent_ok says the name; the agent is still in `last`.
+    expect(await reg(d, "a", mine, beyond)).toBe(mine);
+    expect(await holds(mine)).toHaveLength(LIMITS.renamesPerHour);
+    const rc = await send(d, "s", mine);
+    expect(rc.state).toBe("pending");
+    expect((await delivered(d, rc.msg_id)).to_ref).toBe("a");
+    expect(await send(d, "t", mine)).toMatchObject({
+      state: "refused",
+      reason: "unknown_agent",
     });
+    // A flip is a scope change too, kept the same way.
+    expect(await reg(d, "a", mine, last, { global: true })).toBe(mine);
+    expect(await send(d, "t", mine)).toMatchObject({
+      state: "refused",
+      reason: "unknown_agent",
+    });
+    // A rolling hour later the move goes through.
+    await setClock(t0 + GRACE + 1);
+    expect(await reg(d, "a", mine, beyond)).toBe(mine);
+    expect((await send(d, "t", mine)).state).toBe("pending");
+    d.close();
+  });
+
+  it("a reopen in another scope counts too, and is kept at the limit", async () => {
+    const d = await at();
+    const n1 = ns("lv");
+    const n2 = ns("lv");
+    await reg(d, "s1", uniq("Sender"), n1);
+    await reg(d, "a", uniq("Reo"), n1);
+    const cur = await churn(d, "a", LIMITS.renamesPerHour);
+    d.send({ v: 1, id: id("d"), type: "agent_down", agent_ref: "a" });
+    expect(await reg(d, "a", cur, n2)).toBe(cur);
+    const rc = await send(d, "s1", cur);
+    expect(rc.state).toBe("pending");
+    expect((await delivered(d, rc.msg_id)).to_ref).toBe("a");
+    d.close();
+  });
+
+  it("a close after many moves keeps every hold", async () => {
+    const d = await at();
+    const mine = uniq("Hop");
+    const spaces = Array.from({ length: LIMITS.maxFormerNames + 3 }, () =>
+      ns("lv"),
+    );
+    await reg(d, "a", mine, spaces[0] as string);
+    for (const s of spaces.slice(1))
+      expect(await reg(d, "a", mine, s)).toBe(mine);
+    d.send({ v: 1, id: id("d"), type: "agent_down", agent_ref: "a" });
+    await reg(d, "z", uniq("Sync"), spaces[0] as string);
+    expect(await holds(mine)).toEqual(spaces.map((s) => `${s}/0`));
+    for (const s of spaces)
+      expect(await reg(d, id("x"), mine, s)).toBe(`${mine}-2`);
     d.close();
   });
 });
