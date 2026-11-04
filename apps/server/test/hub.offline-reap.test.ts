@@ -12,7 +12,7 @@ import {
   type ServerFrame,
 } from "@ob/shared";
 import { afterEach, describe, expect, it } from "vitest";
-import { Hub, OFFLINE_REAP_MS } from "../src/hub/do.js";
+import { Hub, OFFLINE_REAP_MS, SWEEP_BATCH } from "../src/hub/do.js";
 import { hub } from "../src/hub/stub.js";
 import { type Daemon, daemon, e, machine, ns, waitFor } from "./helpers.js";
 
@@ -304,7 +304,7 @@ describe("offline reap (#422)", () => {
     expect(at).not.toBe(t0 + OFFLINE_REAP_MS);
   });
 
-  it("a machine offline before the deploy (no disconnected_at) is not reaped on the first alarm", async () => {
+  it("a machine offline before the deploy (no disconnected_at) starts counting at the wake, not at the alarm", async () => {
     const t0 = base();
     await setClock(t0);
     const m = await machine("Legacy");
@@ -318,14 +318,119 @@ describe("offline reap (#422)", () => {
         m.id,
       ),
     );
-    const later = t0 + 3 * OFFLINE_REAP_MS;
-    await alarmAtTime(later);
+    // The alarm never backfills nor reaps it.
+    await alarmAtTime(t0 + 3 * OFFLINE_REAP_MS);
     expect(await liveOf(m.id)).toEqual([name]);
-    // Counting starts now: reaped 24 h later, not before.
-    expect(await disconnectedAt(m.id)).toBe(later);
-    await alarmAtTime(later + OFFLINE_REAP_MS - 1);
+    expect(await disconnectedAt(m.id)).toBeNull();
+
+    // The wake (a fresh instance, real time) starts the clock and arms.
+    await inHub((_, s) => s.storage.deleteAlarm());
+    const before = Date.now();
+    await inHub((_, s) => {
+      new Hub(s, e);
+    });
+    const after = Date.now();
+    const since = (await disconnectedAt(m.id)) as number;
+    expect(since).toBeGreaterThanOrEqual(before);
+    expect(since).toBeLessThanOrEqual(after);
+    let armed: number | null = null;
+    for (let k = 0; k < 100 && armed === null; k++) {
+      armed = await alarmAt();
+      if (armed === null) await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(armed).not.toBeNull();
+    expect(armed as number).toBeLessThanOrEqual(since + OFFLINE_REAP_MS);
+
+    await alarmAtTime(since + OFFLINE_REAP_MS - 1);
     expect(await liveOf(m.id)).toEqual([name]);
-    await alarmAtTime(later + OFFLINE_REAP_MS);
+    await alarmAtTime(since + OFFLINE_REAP_MS);
     expect(await liveOf(m.id)).toEqual([]);
+  });
+
+  it("a due machine that is online after all only has its clock cleared", async () => {
+    const t0 = base();
+    await setClock(t0);
+    const m = await machine("Stale");
+    const d = await connect(m.token);
+    const name = await reg(d, "s", uniq("Stale"), ns("stale"));
+    // A missed clear: the timestamp is old but the socket is open.
+    await inHub((_, s) =>
+      s.storage.sql.exec(
+        "update machines set disconnected_at = ? where id = ?",
+        t0 - 2 * OFFLINE_REAP_MS,
+        m.id,
+      ),
+    );
+    await alarmAtTime(t0);
+    expect(await disconnectedAt(m.id)).toBeNull();
+    expect(await liveOf(m.id)).toEqual([name]);
+    expect(stateOf(await list(d, "s"), name)).toBe("live");
+    d.close();
+  });
+
+  it("more than BATCH agents close across continuation steps, then stop", async () => {
+    const t0 = base();
+    await setClock(t0);
+    const m = await machine("Many");
+    const d = await connect(m.token);
+    const n = ns("many");
+    const total = SWEEP_BATCH + 7;
+    for (let k = 0; k < total; k++) await reg(d, `m${k}`, uniq("Many"), n);
+    await goOffline(d, m.id);
+    const t = t0 + OFFLINE_REAP_MS;
+    // Earlier tests' offline machines come due first; reaped out of the way.
+    await alarmAtTime(t - 1);
+    expect(await liveOf(m.id)).toHaveLength(total);
+    await alarmAtTime(t);
+    expect(await liveOf(m.id)).toHaveLength(7);
+    // A full batch re-arms at now + 1 (the continuation).
+    expect(await alarmAt()).toBe(t + 1);
+    await runAlarm();
+    expect(await liveOf(m.id)).toHaveLength(0);
+    // Done: no further now + 1 continuation for it.
+    const next = await alarmAt();
+    expect(next === null || next > t + 1).toBe(true);
+  });
+
+  it("a sender's pending mail to a reaped agent expires as recipient_closed", async () => {
+    const t0 = base();
+    await setClock(t0);
+    const away = await machine("Inbox");
+    const from = await machine("Sender");
+    const n = ns("inbox");
+    const a = await connect(away.token);
+    const s = await connect(from.token);
+    const to = await reg(a, "i", uniq("Inbox"), n);
+    await reg(s, "x", uniq("Sender"), n);
+    await goOffline(a, away.id);
+    const r = await send(s, "x", to);
+    expect(r.state).toBe("pending");
+    await alarmAtTime(t0 + OFFLINE_REAP_MS);
+    for (;;) {
+      const f = await s.next();
+      if (f.type === "receipt_update" && f.msg_id === r.msg_id) {
+        expect(f).toMatchObject({
+          state: "expired",
+          reason: "recipient_closed",
+        });
+        break;
+      }
+    }
+    s.close();
+  });
+
+  it("webSocketError starts the offline clock", async () => {
+    const t0 = base();
+    await setClock(t0);
+    const m = await machine("Errs");
+    const d = await connect(m.token);
+    await reg(d, "w", uniq("Errs"), ns("errs"));
+    await inHub(async (i, s) => {
+      const ws = s.getWebSockets(m.id)[0];
+      if (!ws) throw new Error("no socket");
+      await i.webSocketError(ws, new Error("boom"));
+    });
+    expect(await disconnectedAt(m.id)).toBe(t0);
+    expect((await d.closed).code).toBe(1011);
   });
 });

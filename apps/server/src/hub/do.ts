@@ -2076,10 +2076,11 @@ export class Hub extends DurableObject<Env> {
             or exists (select 1 from agents indexed by agents_status_due where status_due is not null)
             or exists (select 1 from former_names)
             or exists (select 1 from rename_rl)
-            or exists (select 1 from machines where disconnected_at is not null and revoked_at is null
+            or exists (select 1 from machines where org_id = ? and disconnected_at is not null and revoked_at is null
                 and exists (select 1 from agents where agents.machine_id = machines.id and agents.live = 1))
             or exists (select 1 from meta where org_id = ? and key >= ? and key < ?)
             or exists (select 1 from meta where org_id = ? and key >= ? and key < ?)) as x`,
+      OWNER_ORG_ID,
       OWNER_ORG_ID,
       DRAIN_PREFIX,
       DRAIN_END,
@@ -2966,10 +2967,12 @@ export class Hub extends DurableObject<Env> {
   /**
    * #422: starts the offline clock (now) for every active machine with live
    * agents, no open socket and none running: a hub that predates the column,
-   * or a close the hub never heard. Counting from now means a deploy never
-   * reaps at once. Bounded by MAX_ACTIVE_MACHINES; true if any was marked.
+   * or a close the hub never heard (an eviction or deploy drops sockets
+   * without a close; the hub then wakes here). Counting from now means a
+   * deploy never reaps at once. Run on wake only; bounded by
+   * MAX_ACTIVE_MACHINES.
    */
-  #markOfflineMachines(now: number): boolean {
+  #markOfflineMachines(now: number): void {
     const sql = this.ctx.storage.sql;
     const rows = all<{ id: string }>(
       sql,
@@ -2980,7 +2983,6 @@ export class Hub extends DurableObject<Env> {
       OWNER_ORG_ID,
       MAX_ACTIVE_MACHINES,
     );
-    let marked = false;
     for (const r of rows) {
       if (machineOnline(this.ctx, r.id)) continue;
       sql.exec(
@@ -2988,9 +2990,20 @@ export class Hub extends DurableObject<Env> {
         now,
         r.id,
       );
-      marked = true;
     }
-    return marked;
+  }
+
+  /** #422: the earliest offline reap deadline, scoped as OFFLINE_DUE_SQL; null if none. */
+  #offlineReapDeadline(): number | null {
+    const t =
+      one<{ t: number | null }>(
+        this.ctx.storage.sql,
+        `select min(disconnected_at) as t from machines
+          where org_id = ? and revoked_at is null and disconnected_at is not null
+            and exists (select 1 from agents where agents.machine_id = machines.id and agents.live = 1)`,
+        OWNER_ORG_ID,
+      )?.t ?? null;
+    return t === null ? null : t + OFFLINE_REAP_MS;
   }
 
   /**
@@ -4055,9 +4068,8 @@ export class Hub extends DurableObject<Env> {
       if (!this.#held.has(r.id)) this.#expire(r.id, r.fromAgent);
 
     // 2a. #422: machines offline past OFFLINE_REAP_MS have their agents
-    // closed (before the close drain, which takes their leftover mail). An
-    // offline machine with no clock yet starts counting now.
-    this.#markOfflineMachines(now);
+    // closed (before the close drain, which takes their leftover mail). One
+    // with no clock yet started counting at the wake (#armOnWake).
     if (this.#reapOffline(now)) more = true;
 
     // 2b. Revoked machines' inboxes that did not fit revokeMachine's batch,
@@ -4194,12 +4206,7 @@ export class Hub extends DurableObject<Env> {
       nextStatusDue(sql),
       min("select min(expires_at) as t from former_names"),
       min("select min(at) as t from rename_rl", HOUR_MS),
-      min(
-        `select min(disconnected_at) as t from machines
-          where revoked_at is null and disconnected_at is not null
-            and exists (select 1 from agents where agents.machine_id = machines.id and agents.live = 1)`,
-        OFFLINE_REAP_MS,
-      ),
+      this.#offlineReapDeadline(),
     ].filter((t): t is number => t !== null);
     return ts.length === 0 ? null : Math.min(...ts);
   }
