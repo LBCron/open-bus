@@ -1,3 +1,4 @@
+import { agentHabitsMarkdown } from "@ob/shared";
 import { REPO_URL, SITE_URL } from "../consts";
 import { tools } from "../content/tools";
 import { doc, docs, section } from "../lib/docs";
@@ -27,6 +28,7 @@ export function llmsTxt(): string {
           `- \`${t.name}\`${t.args.length ? ` (${t.args.join("; ")})` : ""}: ${t.description}`,
       ),
     ].join("\n"),
+    agentHabitsMarkdown(),
     "## Docs",
     [
       ...docs.map(
