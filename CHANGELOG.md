@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.66.0](https://github.com/open-artifacts-ai/open-bus/compare/v0.65.0...v0.66.0) (2026-11-04)
+
+
+### Features
+
+* **adapter:** propose the Codex thread's name from its state db (R393e) ([#438](https://github.com/open-artifacts-ai/open-bus/issues/438)) ([ab91788](https://github.com/open-artifacts-ai/open-bus/commit/ab917887219e2689996f6a5f7fe15d2f8512daa9))
+* **adapters:** the rename tool, and renames followed per harness (R393d) ([#437](https://github.com/open-artifacts-ai/open-bus/issues/437)) ([ebce079](https://github.com/open-artifacts-ai/open-bus/commit/ebce0798207266387e464d3d77c767f6fb1366c2))
+* **daemon:** follow renames, from the harness and from the tool (R393c) ([#429](https://github.com/open-artifacts-ai/open-bus/issues/429)) ([c0361c0](https://github.com/open-artifacts-ai/open-bus/commit/c0361c0d76d649c87cfe4227a62677d1a52a809e))
+* **llms:** working-with-other-agents habits in both llms.txt ([#425](https://github.com/open-artifacts-ai/open-bus/issues/425)) ([#428](https://github.com/open-artifacts-ai/open-bus/issues/428)) ([34030f7](https://github.com/open-artifacts-ai/open-bus/commit/34030f7faea6c8ce843030dbeabcf6fc65957953))
+* **server:** close agents of a machine offline for over 24 h ([#422](https://github.com/open-artifacts-ai/open-bus/issues/422)) ([#442](https://github.com/open-artifacts-ai/open-bus/issues/442)) ([f6376dc](https://github.com/open-artifacts-ai/open-bus/commit/f6376dcc9486877d0bfc7530a6215711892325cd))
+* **server:** hub renames, former names and the rename gate ([#393](https://github.com/open-artifacts-ai/open-bus/issues/393)) ([#431](https://github.com/open-artifacts-ai/open-bus/issues/431)) ([0e077c1](https://github.com/open-artifacts-ai/open-bus/commit/0e077c149e1068c4868fc52ca89efcbd7a9a3e6c))
+
+
+### Bug Fixes
+
+* **daemon:** name_kind on every announce, and names that survive ([#430](https://github.com/open-artifacts-ai/open-bus/issues/430)) ([#439](https://github.com/open-artifacts-ai/open-bus/issues/439)) ([9ed3fc3](https://github.com/open-artifacts-ai/open-bus/commit/9ed3fc37769aacb226e6cac4ac53982c9b1ac09d))
+
 ## [0.65.0](https://github.com/open-artifacts-ai/open-bus/compare/v0.64.0...v0.65.0) (2026-11-04)
 
 
