@@ -1,6 +1,7 @@
-import { SELF } from "cloudflare:test";
+import { runInDurableObject, SELF } from "cloudflare:test";
 import { LIMITS, OWNER_ORG_ID, PING, PONG } from "@ob/shared";
 import { describe, expect, it } from "vitest";
+import { Hub } from "../src/hub/do.js";
 import { hub } from "../src/hub/stub.js";
 import {
   daemon,
@@ -161,29 +162,45 @@ describe("hub socket: hello and agents", () => {
     d.close();
   });
 
-  it("frees the name on agent_down and on sessions{closed}", async () => {
-    const m = await machine();
-    const d = await ready(m.token);
-    const a = ns();
-    d.send(up("u1", "ses_a", "Pi", a));
-    await waitFor(d, "agent_ok");
-    d.send({ v: 1, id: "d1", type: "agent_down", agent_ref: "ses_a" });
-    d.send(hello("sync")); // the originating socket gets no roster_changed
-    await waitFor(d, "hello_ok");
-    d.send(up("u2", "ses_b", "Pi", a));
-    expect((await waitFor(d, "agent_ok")).bus_name).toBe("Pi");
-    d.send({
-      v: 1,
-      id: "s1",
-      type: "sessions",
-      open: [],
-      closed: ["ses_b"],
-    });
-    d.send(hello("sync")); // the originating socket gets no roster_changed
-    await waitFor(d, "hello_ok");
-    d.send(up("u3", "ses_c", "Pi", a));
-    expect((await waitFor(d, "agent_ok")).bus_name).toBe("Pi");
-    d.close();
+  it("holds the name for the grace on agent_down and on sessions{closed}, then frees it (#451)", async () => {
+    const clock = (ms: number | null) =>
+      runInDurableObject(
+        hub(e) as unknown as DurableObjectStub<Hub>,
+        (i: Hub) => Hub.setTestClock(i, ms),
+      );
+    const t0 = Date.now() + 200 * LIMITS.formerNameGraceMs;
+    await clock(t0);
+    try {
+      const m = await machine();
+      const d = await ready(m.token);
+      const a = ns();
+      d.send(up("u1", "ses_a", "Pi", a));
+      await waitFor(d, "agent_ok");
+      d.send({ v: 1, id: "d1", type: "agent_down", agent_ref: "ses_a" });
+      d.send(hello("sync")); // the originating socket gets no roster_changed
+      await waitFor(d, "hello_ok");
+      d.send(up("u2", "ses_b", "Pi", a));
+      expect((await waitFor(d, "agent_ok")).bus_name).toBe("Pi-2");
+      d.send({
+        v: 1,
+        id: "s1",
+        type: "sessions",
+        open: [],
+        closed: ["ses_b"],
+      });
+      d.send(hello("sync")); // the originating socket gets no roster_changed
+      await waitFor(d, "hello_ok");
+      d.send(up("u3", "ses_c", "Pi-2", a));
+      expect((await waitFor(d, "agent_ok")).bus_name).toBe("Pi-2-2");
+      await clock(t0 + LIMITS.formerNameGraceMs);
+      d.send(up("u4", "ses_d", "Pi", a));
+      expect((await waitFor(d, "agent_ok")).bus_name).toBe("Pi");
+      d.send(up("u5", "ses_e", "Pi-2", a));
+      expect((await waitFor(d, "agent_ok")).bus_name).toBe("Pi-2");
+      d.close();
+    } finally {
+      await clock(null);
+    }
   });
 });
 
