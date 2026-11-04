@@ -11,7 +11,7 @@ export type DaemonClient = {
   welcome: Extract<DaemonFrame, { type: "welcome" }>;
   state: "open" | "closed";
   request: (frame: {
-    type: "list" | "self" | "send" | "fetch" | "set_status" | "card";
+    type: "list" | "self" | "send" | "fetch" | "set_status" | "card" | "rename";
     id?: string;
     to?: string;
     /** send: the target's namespace (`to_namespace` on the hub wire). */
@@ -24,6 +24,8 @@ export type DaemonClient = {
     /** card: the app's exact origin and its single-use nonce. */
     aud?: string;
     nonce?: string;
+    /** rename: the bus name asked for. */
+    name?: string;
     /** self: also the agent's status, from its hub roster row (AC5c). */
     card?: true;
     /** A tool call: the reply carries this agent's late-delivery notices. */
@@ -36,6 +38,14 @@ export type DaemonClient = {
   ) => void;
   /** OpenBus notices (expired or refused mail) the daemon pushes to this session. */
   onNotice: (cb: (text: string) => void) => void;
+  /**
+   * The agent's bus name changed (#393), pushed to a persistent link (Pi/omp)
+   * whose adapter is at or above RENAME_MIN_CLIENT. A tool rename, a harness
+   * rename and a hub-side change all land here.
+   */
+  onRenamed: (
+    cb: (frame: Extract<DaemonFrame, { type: "renamed" }>) => void,
+  ) => void;
   close: () => void;
 };
 
@@ -78,6 +88,16 @@ export async function connectDaemon(opts: {
   const early: Deliver[] = [];
   let notice: ((text: string) => void) | undefined;
   const earlyNotices: string[] = [];
+  type Renamed = Extract<DaemonFrame, { type: "renamed" }>;
+  let renamed: ((f: Renamed) => void) | undefined;
+  const earlyRenamed: Renamed[] = [];
+  const dispatchRenamed = (f: Renamed) => {
+    try {
+      renamed?.(f);
+    } catch (e) {
+      report(e);
+    }
+  };
   const report =
     opts.onError ?? ((e: unknown) => console.error("onDeliver threw", e));
   const dispatch = (f: Deliver) => {
@@ -111,6 +131,12 @@ export async function connectDaemon(opts: {
               report(e);
             }
           } else earlyNotices.push(frame.text);
+          continue;
+        }
+        // A push, not an answer: it carries no request id to match.
+        if (frame.type === "renamed") {
+          if (renamed) dispatchRenamed(frame);
+          else earlyRenamed.push(frame);
           continue;
         }
         const waiter = pending.get(frame.id);
@@ -188,6 +214,10 @@ export async function connectDaemon(opts: {
     onNotice: (cb) => {
       notice = cb;
       for (const t of earlyNotices.splice(0)) cb(t);
+    },
+    onRenamed: (cb) => {
+      renamed = cb;
+      for (const f of earlyRenamed.splice(0)) dispatchRenamed(f);
     },
     close: () => sock.destroy(),
   };

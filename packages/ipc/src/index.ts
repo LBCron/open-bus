@@ -35,7 +35,9 @@ export {
   LEGACY_KINDS,
   legacyKind,
   seesCard,
+  seesRename,
   withoutCard,
+  withoutRename,
 } from "./legacy.ts";
 export { FrameTooLarge, LineDecoder } from "./lines.ts";
 export {

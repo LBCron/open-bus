@@ -78,6 +78,20 @@ export function liveClaudeSessions(deps: ClaudeLivenessDeps): LiveClaude[] {
     .map(strip);
 }
 
+/**
+ * A live session's own `name` (Claude `/rename`), read fresh from its file
+ * (#393): a resumed session with a custom title comes up as Claude's default
+ * name, so the file is read again after its hello. Undefined when no live
+ * session of that ref is there.
+ */
+export function claudeSessionName(
+  ref: string,
+  deps: ClaudeLivenessDeps,
+): string | undefined {
+  return sessionFiles(deps.dir).find((s) => s.ref === ref && alive(s, deps))
+    ?.name;
+}
+
 /** Where to inject for one session, read fresh each time; null when it is gone. Asks the OS about that session only. */
 export function claudeTarget(
   ref: string,
