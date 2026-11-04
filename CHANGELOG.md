@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.65.0](https://github.com/open-artifacts-ai/open-bus/compare/v0.64.0...v0.65.0) (2026-11-04)
+
+
+### Features
+
+* **server:** remove roles ([#394](https://github.com/open-artifacts-ai/open-bus/issues/394)) ([#404](https://github.com/open-artifacts-ai/open-bus/issues/404)) ([fa69c84](https://github.com/open-artifacts-ai/open-bus/commit/fa69c845d08813a02f1b4760095e50a9e092169a))
+
 ## [0.64.0](https://github.com/open-artifacts-ai/open-bus/compare/v0.63.0...v0.64.0) (2026-11-04)
 
 
