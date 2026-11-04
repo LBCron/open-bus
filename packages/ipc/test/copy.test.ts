@@ -133,6 +133,15 @@ describe("receipt copy", () => {
     );
   });
 
+  it("renders an old hub's role_vacant as unknown_agent (#394)", () => {
+    // Replay, receipt_update and a pre-#394 daemon all bypass the daemon's
+    // remap, and `role_vacant` is meant to be gone from what an agent sees.
+    const vacant = t("refused", "role_vacant", undefined, "lane-6");
+    expect(vacant).toBe(t("refused", "unknown_agent", undefined, "lane-6"));
+    expect(vacant).toContain("Refused (unknown_agent)");
+    expect(vacant).not.toContain("role_vacant");
+  });
+
   it("cuts a long name in the middle so no line passes 80 columns", () => {
     const name = `${"a".repeat(60)}-${"z".repeat(30)}`;
     for (const r of [
