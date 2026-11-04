@@ -1719,27 +1719,30 @@ function liveFormer(
 }
 
 /**
- * #452: whether a live agent other than `exceptId` holds `lname` as a former
- * name in its grace: one that resolves, or a chosen one reserved in any
- * scope (left behind by a move or flip; the set nameTaken reserves).
+ * #452: whether a live agent other than `target` and `sender` holds
+ * `lname` as a former name in its grace: one that resolves, or a chosen one
+ * reserved in any scope (left behind by a move or flip; the set nameTaken
+ * reserves). The sender's own row never counts: it cannot mean itself.
  */
 function heldElsewhere(
   sql: SqlStorage,
   lname: string,
   now: number,
-  exceptId: string,
+  target: string,
+  sender: string,
 ): boolean {
   return (
     one<{ x: number }>(
       sql,
       `select exists (select 1 from former_names f indexed by former_names_lname
          join agents a on a.id = f.agent_id
-         where f.org_id = ? and f.lname = ? and f.expires_at > ? and a.live = 1 and a.id != ?
+         where f.org_id = ? and f.lname = ? and f.expires_at > ? and a.live = 1 and a.id != ? and a.id != ?
            and (f.kind = 'chosen' or (f.global = a.global and (f.global = 1 or f.namespace = a.namespace)))) as x`,
       OWNER_ORG_ID,
       lname,
       now,
-      exceptId,
+      target,
+      sender,
     )?.x === 1
   );
 }
@@ -1816,13 +1819,15 @@ function resolveTarget(
   // is ambiguous too (a chosen former name is reserved only in its scope),
   // counting a chosen one left behind by a move or flip (#451 review).
   if (first)
-    return heldElsewhere(sql, lname, now, first.id)
+    return heldElsewhere(sql, lname, now, first.id, sender.id)
       ? refused("ambiguous")
       : { ok: true, agent: first };
   const former = liveFormer(sql, lname, now, null, 2);
   const f = former[0];
   if (f && (f.global === 1 || former.length === 1))
-    return { ok: true, agent: f };
+    return heldElsewhere(sql, lname, now, f.id, sender.id)
+      ? refused("ambiguous")
+      : { ok: true, agent: f };
   if (former.length > 1) return refused("ambiguous");
   const gone = goneReason(sql, null, lname);
   if (gone) return refused(gone);

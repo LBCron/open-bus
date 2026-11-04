@@ -1472,3 +1472,43 @@ describe("#451 review of 8038558", () => {
     d.close();
   });
 });
+
+describe("#451 review of 35017e2", () => {
+  it("a former name elsewhere is ambiguous against another agent's left-behind reservation (F1)", async () => {
+    const d = await at();
+    const x = ns("rn");
+    const y = ns("rn");
+    const z = ns("rn");
+    const w = ns("rn");
+    const alice = uniq("alice");
+    await reg(d, "a", alice, x);
+    const bob = uniq("bob");
+    await renamed(d, "a", bob);
+    expect(await reg(d, "a", bob, w)).toBe(bob);
+    expect(await reg(d, "e", alice, y)).toBe(alice);
+    await renamed(d, "e", uniq("eve"));
+    await reg(d, "g", uniq("G"), z, { global: true });
+    expect(await send(d, "g", alice)).toMatchObject({
+      state: "refused",
+      reason: "ambiguous",
+    });
+    d.close();
+  });
+
+  it("a global sender's own left-behind reservation never makes its send ambiguous (F2)", async () => {
+    const d = await at();
+    const x = ns("rn");
+    const y = ns("rn");
+    const alice = uniq("alice");
+    await reg(d, "a", alice, x);
+    const bob = uniq("bob");
+    await renamed(d, "a", bob);
+    expect(await reg(d, "a", bob, x, { global: true })).toBe(bob);
+    expect(await reg(d, "c", alice, y)).toBe(alice);
+    const rc = await send(d, "a", alice);
+    expect(rc.state).toBe("pending");
+    expect(rc.to_name).toBeUndefined();
+    expect((await delivered(d, rc.msg_id)).to_ref).toBe("c");
+    d.close();
+  });
+});
