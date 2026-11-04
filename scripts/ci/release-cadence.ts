@@ -2,9 +2,12 @@
 // queue has drained, and keep one `blocker` issue open while a release is stuck.
 // Usage: node --experimental-strip-types scripts/ci/release-cadence.ts <plan|arm|blocker> --repo owner/name
 // `plan` prints `write=true|false` (does arm need the App token?).
-// Opt-in (#435): only a release PR labeled `release-ok` is armed, and a
-// `release-hold` label still stops it. `arm` re-reads the labels right before
-// it enqueues, so a change mid-run wins.
+// Opt-in (#435): only a release PR labeled `release-ok` whose head carries
+// the workflow's `release-ok` status is armed (#445), and a `release-hold`
+// label still stops it. `arm` re-reads the labels right before it enqueues,
+// so a change mid-run wins. A release that is held or lost its approval is
+// taken back, whoever armed it: disarmed, and dequeued if queued. This is the
+// backstop for release-label.yml's dequeue/disarm jobs.
 // Needs GH_TOKEN in the environment. `arm` runs with the release App's token
 // (so the merge triggers workflows); `blocker` runs with GITHUB_TOKEN.
 import { spawnSync } from "node:child_process";
@@ -26,6 +29,12 @@ export const OK_LABEL = "release-ok";
  * without it, so the cadence waits for a fresh approval.
  */
 export const APPROVAL_CONTEXT = "release-ok";
+/**
+ * Only a status created by this login approves (#445 review): the
+ * release-label workflow's GITHUB_TOKEN. Any other token with statuses:write
+ * could forge the context. Compared without a `[bot]` suffix.
+ */
+export const APPROVAL_CREATOR = "github-actions";
 /** A release PR waiting for approval gets a gentle `blocker` reminder after this long. */
 export const APPROVAL_REMINDER_MS = 3 * DAY_MS;
 
@@ -35,10 +44,12 @@ export type Exec = (
   args: string[],
 ) => ExecResult | Promise<ExecResult>;
 
-const QUERY = `query($owner: String!, $name: String!, $head: String!, $branch: String!) {
+export const QUERY = `query($owner: String!, $name: String!, $head: String!, $branch: String!) {
   repository(owner: $owner, name: $name) {
-    pullRequests(states: OPEN, headRefName: $head, first: 1) {
+    pullRequests(states: OPEN, headRefName: $head, first: 10) {
       nodes {
+        id
+        isCrossRepository
         number
         url
         title
@@ -56,7 +67,7 @@ const QUERY = `query($owner: String!, $name: String!, $head: String!, $branch: S
                   nodes {
                     __typename
                     ... on CheckRun { name conclusion status detailsUrl completedAt }
-                    ... on StatusContext { context state targetUrl createdAt }
+                    ... on StatusContext { context state targetUrl createdAt creator { login } }
                   }
                 }
               }
@@ -84,8 +95,11 @@ type Context = {
   targetUrl?: string;
   completedAt?: string | null;
   createdAt?: string | null;
+  creator?: { login?: string } | null;
 };
 export type ReleasePr = {
+  /** GraphQL node id, for dequeuePullRequest. */
+  id: string;
   number: number;
   url: string;
   title: string;
@@ -133,7 +147,10 @@ async function snapshot(exec: Exec, repo: string): Promise<Snapshot> {
     "branch=main",
   ]);
   const repository = JSON.parse(out)?.data?.repository;
-  const n = repository?.pullRequests?.nodes?.[0];
+  // A fork can open a PR from a branch with the same name: only ours counts.
+  const n = (repository?.pullRequests?.nodes ?? []).find(
+    (p: { isCrossRepository?: unknown }) => p?.isCrossRepository === false,
+  );
   const entries: { pullRequest?: { headRefName?: string } }[] =
     repository?.mergeQueue?.entries?.nodes ?? [];
   const others = entries.filter(
@@ -150,6 +167,7 @@ async function snapshot(exec: Exec, repo: string): Promise<Snapshot> {
   return {
     others,
     pr: {
+      id: String(n.id ?? ""),
       number: n.number,
       url: n.url,
       title: n.title,
@@ -167,7 +185,8 @@ async function snapshot(exec: Exec, repo: string): Promise<Snapshot> {
         (c) =>
           c.__typename === "StatusContext" &&
           c.context === APPROVAL_CONTEXT &&
-          c.state === "SUCCESS",
+          c.state === "SUCCESS" &&
+          bare(c.creator?.login) === APPROVAL_CREATOR,
       ),
       rollup: rollup?.state ?? "NONE",
       contexts,
@@ -185,6 +204,7 @@ export type ArmResult =
   | { action: "held"; pr: number }
   | { action: "not-ok"; pr: number }
   | { action: "disarmed"; pr: number }
+  | { action: "dequeued"; pr: number }
   | { action: "armed"; pr: number };
 
 type Opts = {
@@ -192,15 +212,80 @@ type Opts = {
   repo: string;
   now?: () => number;
   capMs?: number;
-  /** The release App's bot login; only auto-merge it enabled is ever disabled. */
+  /** The release App's bot login: the drain rule only re-checks an arm it set. A hold or lost approval disarms any arm. */
   appLogin?: string;
 };
 type Plan =
   | { do: "none"; result: ArmResult; msg: string }
   | { do: "disarm"; pr: ReleasePr }
+  | { do: "stop"; pr: ReleasePr }
   | { do: "arm"; pr: ReleasePr; capHit: boolean };
 
 const bare = (l?: string) => String(l ?? "").replace(/\[bot\]$/, "");
+
+const STATE_QUERY =
+  "query($id: ID!) { node(id: $id) { ... on PullRequest { isInMergeQueue autoMergeRequest { enabledAt } } } }";
+
+/** Reads whether the PR is queued and armed. An unexpected reply throws: it must never read as "not queued". */
+async function mergeState(
+  exec: Exec,
+  id: string,
+): Promise<{ queued: boolean; armed: boolean }> {
+  const out = await gh(exec, [
+    "api",
+    "graphql",
+    "-f",
+    `query=${STATE_QUERY}`,
+    "-f",
+    `id=${id}`,
+  ]);
+  const node = JSON.parse(out)?.data?.node;
+  if (
+    !node ||
+    typeof node.isInMergeQueue !== "boolean" ||
+    !("autoMergeRequest" in node)
+  )
+    throw new Error(`unexpected merge-queue state for ${id}: ${out.trim()}`);
+  return { queued: node.isInMergeQueue, armed: node.autoMergeRequest != null };
+}
+
+export type Stopped = { dequeued: boolean; disarmed: boolean };
+
+/**
+ * Takes a release PR back: dequeues it if queued, then disables auto-merge
+ * if it is still set (whoever armed it), so GitHub can't enqueue it again.
+ */
+export async function stopRelease(o: {
+  exec: Exec;
+  repo: string;
+  id: string;
+  number: number;
+}): Promise<Stopped> {
+  let s = await mergeState(o.exec, o.id);
+  let dequeued = false;
+  if (s.queued) {
+    await gh(o.exec, [
+      "api",
+      "graphql",
+      "-f",
+      "query=mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }",
+      "-f",
+      `id=${o.id}`,
+    ]);
+    dequeued = true;
+    s = await mergeState(o.exec, o.id);
+  }
+  if (!s.armed) return { dequeued, disarmed: false };
+  await gh(o.exec, [
+    "pr",
+    "merge",
+    String(o.number),
+    "--disable-auto",
+    "--repo",
+    o.repo,
+  ]);
+  return { dequeued, disarmed: true };
+}
 
 function plan(
   s: Snapshot,
@@ -219,6 +304,10 @@ function plan(
     pr.rollup === "SUCCESS" &&
     pr.settledAt !== undefined &&
     now - pr.settledAt >= capMs;
+  const blocked = pr.held || !pr.ok || !pr.approved;
+  // Held, or no approval on this head (a push since it was armed, say):
+  // take it out of the queue. The backstop for release-label.yml (#445 review).
+  if (pr.queued && blocked) return { do: "stop", pr };
   if (pr.queued)
     return {
       do: "none",
@@ -226,9 +315,8 @@ function plan(
       msg: `release PR #${pr.number} is already queued`,
     };
   if (pr.held) {
-    // A hold also takes back an arm the App already set, while it is not queued.
-    const ours = Boolean(appLogin) && bare(pr.armedBy) === bare(appLogin);
-    if (pr.armed && ours) return { do: "disarm", pr };
+    // A hold takes back any arm, the App's or a person's.
+    if (pr.armed) return { do: "disarm", pr };
     return {
       do: "none",
       result: { action: "held", pr: pr.number },
@@ -237,9 +325,8 @@ function plan(
   }
   if (!pr.ok || !pr.approved) {
     // Opt-in (#435), tied to the head (#445): without release-ok on this exact
-    // head, take back an arm the App set.
-    const ours = Boolean(appLogin) && bare(pr.armedBy) === bare(appLogin);
-    if (pr.armed && ours) return { do: "disarm", pr };
+    // head, take back any arm, a person's too (#445 review).
+    if (pr.armed) return { do: "disarm", pr };
     return {
       do: "none",
       result: { action: "not-ok", pr: pr.number },
@@ -298,6 +385,23 @@ export async function arm(
     o.log(p.msg);
     return p.result;
   }
+  if (p.do === "stop") {
+    const r = await stopRelease({
+      exec: o.exec,
+      repo: o.repo,
+      id: p.pr.id,
+      number: p.pr.number,
+    });
+    const why = p.pr.held
+      ? `it has the ${HOLD_LABEL} label`
+      : !p.pr.ok
+        ? `it has no ${OK_LABEL} label`
+        : `its head ${p.pr.oid.slice(0, 7)} has no ${OK_LABEL} approval`;
+    o.log(
+      `took release PR #${p.pr.number} out of the merge queue${r.disarmed ? " and disabled auto-merge" : ""}: ${why}`,
+    );
+    return { action: "dequeued", pr: p.pr.number };
+  }
   if (p.do === "disarm") {
     await gh(o.exec, [
       "pr",
@@ -312,7 +416,9 @@ export async function arm(
         ? `disabled auto-merge on release PR #${p.pr.number}: it has the ${HOLD_LABEL} label`
         : !p.pr.ok
           ? `disabled auto-merge on release PR #${p.pr.number}: it has no ${OK_LABEL} label`
-          : `disabled auto-merge on release PR #${p.pr.number} to re-check the drain on its current head`,
+          : !p.pr.approved
+            ? `disabled auto-merge on release PR #${p.pr.number}: its head has no ${OK_LABEL} approval`
+            : `disabled auto-merge on release PR #${p.pr.number} to re-check the drain on its current head`,
     );
     return { action: "disarmed", pr: p.pr.number };
   }

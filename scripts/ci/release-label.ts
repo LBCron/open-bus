@@ -4,10 +4,15 @@
 //   by release-please (a new head, no status) needs a fresh approval. The
 //   cadence arms only a head that carries the status (release-cadence.ts).
 // - `dequeue` runs when `release-hold` is added or `release-ok` is removed.
-//   A queued release PR no longer passes through `plan`, so it takes it out.
+//   It takes the release PR out of the merge queue if queued, and disables
+//   auto-merge whoever set it, so GitHub can't enqueue it again once green.
+// - `disarm` runs on every push to the release branch (release-please's
+//   force-push): the new head has no approval, so it does the same.
+// The cadence (release-cadence.ts) is the backstop if either job fails.
 // Usage:
 //   node --experimental-strip-types scripts/ci/release-label.ts approve --repo owner/name --pr N --sha SHA
 //   node --experimental-strip-types scripts/ci/release-label.ts dequeue --repo owner/name --pr N
+//   node --experimental-strip-types scripts/ci/release-label.ts disarm --repo owner/name --pr N
 // Needs GH_TOKEN in the environment.
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
@@ -16,6 +21,8 @@ import {
   HOLD_LABEL,
   OK_LABEL,
   RELEASE_BRANCH,
+  type Stopped,
+  stopRelease,
 } from "./release-cadence.ts";
 
 export type ExecResult = { code: number; stdout: string; stderr: string };
@@ -91,12 +98,20 @@ export async function approve(o: {
   return "approved";
 }
 
-export type DequeueResult =
-  | "dequeued"
-  | "not-queued"
-  | "not-held"
-  | "not-release";
+export type StopResult = "dequeued" | "disarmed" | "dequeued-disarmed" | "idle";
 
+const said = (r: Stopped): StopResult =>
+  r.dequeued && r.disarmed
+    ? "dequeued-disarmed"
+    : r.dequeued
+      ? "dequeued"
+      : r.disarmed
+        ? "disarmed"
+        : "idle";
+
+export type DequeueResult = StopResult | "not-held" | "not-release";
+
+/** On a hold or a withdrawn approval: dequeue the release PR and disable its auto-merge. */
 export async function dequeue(o: {
   exec: Exec;
   repo: string;
@@ -107,26 +122,34 @@ export async function dequeue(o: {
   if (!isRelease(pr, o.repo)) return "not-release";
   const stop = pr.labels.includes(HOLD_LABEL) || !pr.labels.includes(OK_LABEL);
   if (!stop) return "not-held";
-  const q = JSON.parse(
-    await gh(o.exec, [
-      "api",
-      "graphql",
-      "-f",
-      "query=query($id: ID!) { node(id: $id) { ... on PullRequest { isInMergeQueue } } }",
-      "-f",
-      `id=${pr.nodeId}`,
-    ]),
+  return said(
+    await stopRelease({
+      exec: o.exec,
+      repo: o.repo,
+      id: pr.nodeId,
+      number: o.pr,
+    }),
   );
-  if (!q?.data?.node?.isInMergeQueue) return "not-queued";
-  await gh(o.exec, [
-    "api",
-    "graphql",
-    "-f",
-    "query=mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }",
-    "-f",
-    `id=${pr.nodeId}`,
-  ]);
-  return "dequeued";
+}
+
+export type DisarmResult = StopResult | "not-release";
+
+/** On a push to the release branch: the new head isn't approved, so take back any arm or queue entry. */
+export async function disarm(o: {
+  exec: Exec;
+  repo: string;
+  pr: number;
+}): Promise<DisarmResult> {
+  const pr = await readPr(o.exec, o.repo, o.pr);
+  if (!isRelease(pr, o.repo)) return "not-release";
+  return said(
+    await stopRelease({
+      exec: o.exec,
+      repo: o.repo,
+      id: pr.nodeId,
+      number: o.pr,
+    }),
+  );
 }
 
 const realExec: Exec = (cmd, args) => {
@@ -150,17 +173,19 @@ async function main(argv: string[]): Promise<number> {
     !repo ||
     !Number.isInteger(pr) ||
     pr <= 0 ||
-    (mode !== "approve" && mode !== "dequeue")
+    (mode !== "approve" && mode !== "dequeue" && mode !== "disarm")
   ) {
     console.error(
-      "usage: release-label.ts approve --repo owner/name --pr N --sha SHA | dequeue --repo owner/name --pr N",
+      "usage: release-label.ts approve --repo owner/name --pr N --sha SHA | dequeue --repo owner/name --pr N | disarm --repo owner/name --pr N",
     );
     return 2;
   }
   const r =
     mode === "approve"
       ? await approve({ exec: realExec, repo, pr, sha: arg("--sha") ?? "" })
-      : await dequeue({ exec: realExec, repo, pr });
+      : mode === "dequeue"
+        ? await dequeue({ exec: realExec, repo, pr })
+        : await disarm({ exec: realExec, repo, pr });
   console.log(r);
   return 0;
 }

@@ -7,6 +7,7 @@ import {
   type Exec,
   HOLD_LABEL,
   OK_LABEL,
+  QUERY,
   RELEASE_BRANCH,
   willWrite,
 } from "./release-cadence.ts";
@@ -17,6 +18,7 @@ const APPROVED = {
   __typename: "StatusContext",
   context: APPROVAL_CONTEXT,
   state: "SUCCESS",
+  creator: { login: "github-actions" },
 };
 const NOW = Date.parse("2026-10-21T15:00:00Z");
 const hoursAgo = (h: number) => new Date(NOW - h * 3600_000).toISOString();
@@ -31,6 +33,7 @@ type Ctx = {
   context?: string;
   state?: string;
   targetUrl?: string;
+  creator?: { login: string } | null;
 };
 type Fixture = {
   pr?: {
@@ -47,6 +50,12 @@ type Fixture = {
     labels?: string[];
     /** Labels `gh pr view` sees at arm time (a hold set after the snapshot). */
     labelsNow?: string[];
+    /** A fork PR with the same head branch name, listed before ours. */
+    fork?: boolean;
+    /** Only a fork's PR has the branch name. */
+    forkOnly?: boolean;
+    /** The merge-queue state read answers with this instead (fail-closed tests). */
+    stateReply?: unknown;
   };
   queue?: { headRefName: string; number: number }[] | null;
   issues?: {
@@ -61,49 +70,109 @@ type Fixture = {
 /** A fake `gh`: answers graphql and the REST/issue commands from the fixture and logs every call. */
 function fake(f: Fixture) {
   const calls: string[][] = [];
+  // Live merge-queue state: the dequeue mutation and --disable-auto change it.
+  const live = { queued: Boolean(f.pr?.queued), armed: Boolean(f.pr?.armed) };
   const exec: Exec = (cmd, args) => {
     calls.push([cmd, ...args]);
     const ok = (stdout: string) => ({ code: 0, stdout, stderr: "" });
     if (cmd !== "gh") return { code: 127, stdout: "", stderr: "no" };
+    const q = args.find((a) => a.startsWith("query=")) ?? "";
+    if (
+      args[0] === "api" &&
+      args[1] === "graphql" &&
+      q.includes("dequeuePullRequest")
+    ) {
+      live.queued = false;
+      return ok("{}");
+    }
+    if (args[0] === "api" && args[1] === "graphql" && q.includes("node(id")) {
+      if (f.pr?.stateReply !== undefined)
+        return ok(JSON.stringify(f.pr.stateReply));
+      return ok(
+        JSON.stringify({
+          data: {
+            node: {
+              isInMergeQueue: live.queued,
+              autoMergeRequest: live.armed ? { enabledAt: hoursAgo(0) } : null,
+            },
+          },
+        }),
+      );
+    }
+    if (
+      args[0] === "pr" &&
+      args[1] === "merge" &&
+      args.includes("--disable-auto")
+    )
+      live.armed = false;
     if (args[0] === "api" && args[1] === "graphql") {
-      const pr = f.pr
-        ? [
+      const fork = {
+        id: "PR_fork",
+        number: 999,
+        isCrossRepository: true,
+        url: `https://github.com/${REPO}/pull/999`,
+        title: "fork",
+        createdAt: hoursAgo(1),
+        isInMergeQueue: false,
+        labels: { nodes: [{ name: OK_LABEL }] },
+        autoMergeRequest: null,
+        commits: {
+          nodes: [
             {
-              number: f.pr.number ?? 301,
-              url: `https://github.com/${REPO}/pull/${f.pr.number ?? 301}`,
-              title: "chore(main): release 0.6.0",
-              createdAt: f.pr.createdAt ?? hoursAgo(1),
-              isInMergeQueue: f.pr.queued ?? false,
-              labels: {
-                nodes: (f.pr.labels ?? [OK_LABEL]).map((name) => ({ name })),
+              commit: {
+                oid: "f0f0",
+                statusCheckRollup: {
+                  state: "SUCCESS",
+                  contexts: { nodes: [APPROVED] },
+                },
               },
-              autoMergeRequest: f.pr.armed
-                ? {
-                    enabledAt: hoursAgo(0),
-                    enabledBy: { login: f.pr.armedBy ?? "oa-release" },
-                  }
-                : null,
-              commits: {
-                nodes: [
-                  {
-                    commit: {
-                      oid: f.pr.oid ?? "abc123",
-                      statusCheckRollup: {
-                        state: f.pr.state ?? "SUCCESS",
-                        contexts: {
-                          nodes: [
-                            ...(f.pr.contexts ?? []),
-                            ...(f.pr.approved === false ? [] : [APPROVED]),
-                          ],
+            },
+          ],
+        },
+      };
+      const pr = f.pr?.forkOnly
+        ? [fork]
+        : f.pr
+          ? [
+              ...(f.pr.fork ? [fork] : []),
+              {
+                id: `PR_${f.pr.number ?? 301}`,
+                isCrossRepository: false,
+                number: f.pr.number ?? 301,
+                url: `https://github.com/${REPO}/pull/${f.pr.number ?? 301}`,
+                title: "chore(main): release 0.6.0",
+                createdAt: f.pr.createdAt ?? hoursAgo(1),
+                isInMergeQueue: f.pr.queued ?? false,
+                labels: {
+                  nodes: (f.pr.labels ?? [OK_LABEL]).map((name) => ({ name })),
+                },
+                autoMergeRequest: f.pr.armed
+                  ? {
+                      enabledAt: hoursAgo(0),
+                      enabledBy: { login: f.pr.armedBy ?? "oa-release" },
+                    }
+                  : null,
+                commits: {
+                  nodes: [
+                    {
+                      commit: {
+                        oid: f.pr.oid ?? "abc123",
+                        statusCheckRollup: {
+                          state: f.pr.state ?? "SUCCESS",
+                          contexts: {
+                            nodes: [
+                              ...(f.pr.contexts ?? []),
+                              ...(f.pr.approved === false ? [] : [APPROVED]),
+                            ],
+                          },
                         },
                       },
                     },
-                  },
-                ],
+                  ],
+                },
               },
-            },
-          ]
-        : [];
+            ]
+          : [];
       const queue =
         f.queue === null || f.queue === undefined
           ? f.queue === null
@@ -465,19 +534,15 @@ describe("release-hold", () => {
     const g = fake({ pr: { labels: ["autorelease: pending", OK_LABEL] } });
     expect((await arm_(g)).action).toBe("armed");
   });
-  it("a hold takes back the App's arm, but never a human's, and never a queued PR", async () => {
-    const ours = fake({ pr: { armed: true, labels: ["release-hold"] } });
-    expect((await arm_(ours)).action).toBe("disarmed");
-    expect(ours.wrote("pr merge")).toEqual([
-      ["gh", "pr", "merge", "301", "--disable-auto", "--repo", REPO],
-    ]);
-    for (const pr of [
-      { armed: true, armedBy: "leourbina", labels: ["release-hold"] },
-      { armed: true, queued: true, labels: ["release-hold"] },
-    ]) {
-      const g = fake({ pr });
-      expect(["held", "already"]).toContain((await arm_(g)).action);
-      expect(g.wrote("pr merge")).toEqual([]);
+  it("a hold takes back any arm, the App's or a person's (#445 review)", async () => {
+    for (const armedBy of ["oa-release", "leourbina"]) {
+      const g = fake({
+        pr: { armed: true, armedBy, labels: ["release-hold"] },
+      });
+      expect((await arm_(g)).action, armedBy).toBe("disarmed");
+      expect(g.wrote("pr merge")).toEqual([
+        ["gh", "pr", "merge", "301", "--disable-auto", "--repo", REPO],
+      ]);
     }
   });
 });
@@ -757,7 +822,7 @@ describe("release-ok opt-in (#435, option B)", () => {
     ).toBe("held");
   });
 
-  it("disarms the App's arm when release-ok is taken off; never a person's", async () => {
+  it("disarms any arm when release-ok is taken off, a person's too (#445 review)", async () => {
     const ours = fake({ pr: { armed: true, labels: [] } });
     expect(
       (
@@ -781,8 +846,10 @@ describe("release-ok opt-in (#435, option B)", () => {
           appLogin: "oa-release",
         })
       ).action,
-    ).not.toBe("disarmed");
-    expect(theirs.wrote("pr merge")).toEqual([]);
+    ).toBe("disarmed");
+    expect(theirs.wrote("pr merge")).toEqual([
+      ["gh", "pr", "merge", "301", "--disable-auto", "--repo", REPO],
+    ]);
   });
 });
 
@@ -841,5 +908,156 @@ describe("release-ok is tied to the head it was added on (#445)", () => {
         })
       ).action,
     ).toBe("disarmed");
+  });
+});
+
+describe("a queued or armed release that lost its approval is taken back (#445 review)", () => {
+  const dequeued = (g: ReturnType<typeof fake>) =>
+    g.calls.filter((c) =>
+      c.some((a) => a.includes("dequeuePullRequest") && a.startsWith("query=")),
+    );
+  const disabled = (g: ReturnType<typeof fake>) =>
+    g.wrote("pr merge").filter((c) => c.includes("--disable-auto"));
+
+  it("a queued release that is held, unlabeled or unapproved is dequeued and disarmed, and plan asks for the token", async () => {
+    for (const pr of [
+      { labels: [OK_LABEL, HOLD_LABEL] },
+      { labels: [] },
+      { labels: [OK_LABEL], approved: false },
+    ]) {
+      const f = { pr: { ...pr, queued: true, armed: true } };
+      expect(
+        await willWrite({ exec: fake(f).exec, repo: REPO }),
+        JSON.stringify(pr),
+      ).toBe(true);
+      const g = fake(f);
+      expect(await arm_(g), JSON.stringify(pr)).toEqual({
+        action: "dequeued",
+        pr: 301,
+      });
+      const [d] = dequeued(g);
+      expect(d?.join(" ")).toContain("id=PR_301");
+      expect(disabled(g)).toHaveLength(1);
+      // never re-armed in the same run
+      expect(g.wrote("pr merge").filter((c) => c.includes("--auto"))).toEqual(
+        [],
+      );
+    }
+  });
+
+  it("B2: armed at head A, release-please pushed head B, GitHub queued B: plan dequeues and disarms", async () => {
+    // Head B carries no release-ok status; the App's arm from head A is still set.
+    const g = fake({
+      pr: {
+        oid: "b0b0",
+        labels: [OK_LABEL],
+        approved: false,
+        armed: true,
+        armedBy: "oa-release",
+        queued: true,
+      },
+    });
+    expect((await arm_(g)).action).toBe("dequeued");
+    expect(dequeued(g)).toHaveLength(1);
+    expect(disabled(g)).toHaveLength(1);
+  });
+
+  it("dequeues a queued release even with no arm left, and only disables an arm that is still set", async () => {
+    const g = fake({
+      pr: { labels: [HOLD_LABEL], queued: true, armed: false },
+    });
+    expect((await arm_(g)).action).toBe("dequeued");
+    expect(dequeued(g)).toHaveLength(1);
+    expect(disabled(g)).toEqual([]);
+  });
+
+  it("leaves an approved, unheld, queued release alone", async () => {
+    const f = { pr: { labels: [OK_LABEL], queued: true, armed: true } };
+    expect(await willWrite({ exec: fake(f).exec, repo: REPO })).toBe(false);
+    const g = fake(f);
+    expect((await arm_(g)).action).toBe("already");
+    expect(dequeued(g)).toEqual([]);
+    expect(g.wrote("pr merge")).toEqual([]);
+  });
+
+  it("an unexpected merge-queue state fails closed (throws), never reads as not queued", async () => {
+    for (const stateReply of [
+      {},
+      { data: { node: null } },
+      { data: { node: { isInMergeQueue: "no" } } },
+    ]) {
+      const g = fake({
+        pr: { labels: [HOLD_LABEL], queued: true, armed: true, stateReply },
+      });
+      await expect(arm_(g), JSON.stringify(stateReply)).rejects.toThrow(
+        /merge-queue state/,
+      );
+    }
+  });
+
+  it("a person's arm on an unapproved head is disarmed too", async () => {
+    const g = fake({
+      pr: {
+        labels: [OK_LABEL],
+        approved: false,
+        armed: true,
+        armedBy: "leourbina",
+      },
+    });
+    expect((await arm_(g)).action).toBe("disarmed");
+    expect(disabled(g)).toHaveLength(1);
+  });
+});
+
+describe("only the workflow's own release-ok status approves (#445 review M1)", () => {
+  it("a release-ok status created by anyone but github-actions doesn't approve", async () => {
+    for (const creator of [
+      { login: "leourbina" },
+      { login: "oa-release[bot]" },
+      null,
+    ]) {
+      const g = fake({
+        pr: {
+          labels: [OK_LABEL],
+          approved: false,
+          contexts: [{ ...APPROVED, creator }] as Ctx[],
+        },
+      });
+      expect((await arm_(g)).action, JSON.stringify(creator)).toBe("not-ok");
+      expect(g.wrote("pr merge")).toEqual([]);
+    }
+  });
+  it("github-actions approves, with or without the [bot] suffix", async () => {
+    for (const login of ["github-actions", "github-actions[bot]"]) {
+      const g = fake({
+        pr: {
+          labels: [OK_LABEL],
+          approved: false,
+          contexts: [{ ...APPROVED, creator: { login } }] as Ctx[],
+        },
+      });
+      expect((await arm_(g)).action, login).toBe("armed");
+    }
+  });
+  it("the snapshot query fetches the status creator", () => {
+    expect(QUERY).toMatch(/StatusContext \{[^}]*creator \{ login \}/);
+  });
+});
+
+describe("a fork's PR with the release branch name is ignored (#445 review)", () => {
+  it("picks the repo's own PR even when a fork's is listed first", async () => {
+    const g = fake({ pr: { fork: true, oid: "0a0a" } });
+    expect((await arm_(g)).action).toBe("armed");
+    const [m] = g.wrote("pr merge");
+    expect(m).toContain("301");
+    expect(m).not.toContain("999");
+  });
+  it("only a fork's PR: nothing to do", async () => {
+    const g = fake({ pr: { forkOnly: true } });
+    expect((await arm_(g)).action).toBe("none");
+    expect(g.wrote("pr merge")).toEqual([]);
+  });
+  it("the snapshot query asks for isCrossRepository", () => {
+    expect(QUERY).toContain("isCrossRepository");
   });
 });
