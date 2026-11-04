@@ -135,3 +135,45 @@ describe("CLI cuts by columns, not code points (AC5c M1)", () => {
     },
   );
 });
+
+describe("a former name (#393)", () => {
+  const former = (name: string) => [
+    { name, expires_at: "2026-11-04T12:00:00.000Z" },
+  ];
+
+  it("shows the newest one as (was x) after the row", () => {
+    const c = ctx();
+    const { lines } = rosterBlock(c, {
+      namespace: "ns",
+      agents: [row({ former_names: former("old") }), row({ name: "b" })],
+    });
+    expect(lines.slice(1)).toEqual([
+      "  b                   Claude Code  mbp                   ● live",
+      "  code-96             Claude Code  mbp                   ● live  (was old)",
+    ]);
+  });
+
+  it("shows nothing when the daemon sends none", () => {
+    const c = ctx();
+    const { lines } = rosterBlock(c, {
+      namespace: "ns",
+      agents: [row({})],
+    });
+    expect(lines[1]).toBe(
+      "  code-96             Claude Code  mbp                   ● live",
+    );
+  });
+
+  it("cuts a long former name so the row keeps to 80 columns", () => {
+    const c = ctx();
+    const { lines } = rosterBlock(c, {
+      namespace: "ns",
+      agents: [
+        row({ machine: "m".repeat(22), former_names: former("o".repeat(64)) }),
+      ],
+    });
+    expect(cols(lines[1] as string)).toBeLessThanOrEqual(80);
+    expect(lines[1]).toContain("(was ");
+    expect(lines[1]?.endsWith("…")).toBe(true);
+  });
+});

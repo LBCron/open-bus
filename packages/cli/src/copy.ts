@@ -38,6 +38,8 @@ export type RosterAgent = CardFields & {
   kind: string;
   machine: string;
   state: "live" | "queued";
+  /** Names the agent left that still reach it (#393), newest first; only from a daemon at the gate. */
+  former_names?: readonly { name: string }[];
 };
 
 const len = (s: string) => [...s].length;
@@ -329,12 +331,20 @@ export function copy(style: Style) {
       const lead = `${n} agent${n === 1 ? "" : "s"} in namespace `;
       return `${lead}${p("accent", clip(namespace, len(lead) + 2 + len(meta)))}  ${p("muted", meta)}`;
     },
-    rosterRow: (a: RosterAgent) =>
-      `  ${cell(a.name, 20, more)}${cell(kindLabel(a.kind), 13, more)}${cell(a.machine, 22, more)}${
+    rosterRow: (a: RosterAgent) => {
+      const row = `  ${cell(a.name, 20, more)}${cell(kindLabel(a.kind), 13, more)}${cell(a.machine, 22, more)}${
         a.state === "live"
           ? p("success", `${g("live")} live`)
           : p("warning", `${g("queued")} queued`)
-      }`,
+      }`;
+      // A former name (#393): "name (was x)", the newest one, cut to the row.
+      const former = a.former_names?.[0]?.name;
+      if (former === undefined) return row;
+      const tag = `  ${p("muted", `(was ${displayKind(former)})`)}`;
+      return cols(row + tag) <= WIDTH
+        ? row + tag
+        : row + cutCols(tag, Math.max(0, WIDTH - cols(row)), more);
+    },
     /** The row's status, under it (AC5c): the agent's own report, cut to 80 columns. */
     rosterSays: (a: RosterAgent, now: number) => {
       const says = statusSaysText(a, now);
