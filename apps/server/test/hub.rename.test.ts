@@ -802,3 +802,25 @@ describe("default names (R393b)", () => {
     d.close();
   });
 });
+
+describe("#420: a reply to a renamed agent's old name", () => {
+  it("reaches it across machines in one namespace during the grace", async () => {
+    // OA Owner (MacBook) got a message from a default-named session on the
+    // workstation, which then took its chosen name; the reply to the old
+    // name must still arrive.
+    const work = await at();
+    const mac = await at();
+    const n = ns("i420");
+    const old = await reg(work, "w", "open-artifacts", n, { kind: "default" });
+    expect(old).toMatch(/^open-artifacts-[0-9a-f]{4}$/);
+    await reg(mac, "o", uniq("OA Owner"), n);
+    const chosen = uniq("OA Product");
+    await renamed(work, "w", chosen, "chosen");
+
+    const rc = await send(mac, "o", old);
+    expect(rc).toMatchObject({ state: "pending", to_name: chosen });
+    expect((await delivered(work, rc.msg_id)).to_ref).toBe("w");
+    work.close();
+    mac.close();
+  });
+});
