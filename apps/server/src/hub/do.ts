@@ -322,7 +322,7 @@ const preTokenKinds = (ws: WebSocket): boolean =>
   !semverGte(attachmentOf(ws)?.clientVersion ?? "", KIND_TOKEN_MIN_CLIENT);
 
 /**
- * The agent card wire (roster status, receipt `to_name`) goes only to
+ * The agent card wire (roster status, `card`, `card_refused`) goes only to
  * daemons at or above AGENT_CARD_MIN_CLIENT; their decoders are strict.
  * Fails closed, as preTokenKinds does.
  */
@@ -695,12 +695,51 @@ const RENAME_RL_PURGE_SQL =
 const FORMER_PURGE_SQL =
   "delete from former_names where rowid in (select rowid from former_names indexed by former_names_due where expires_at <= ? limit ?) returning rowid";
 
-/** R393b: a closed or revoked agent's former names go at once (the names free). */
-function dropFormerNames(sql: SqlStorage, agentIds: string[]): void {
+/**
+ * R393b: a closed or revoked agent's former names go at once (the names
+ * free), and its rename log with them (`closed`). A namespace move or global
+ * flip drops only the former names.
+ */
+function dropNameState(
+  sql: SqlStorage,
+  agentIds: string[],
+  closed: boolean,
+): void {
   if (agentIds.length === 0) return;
+  const ids = JSON.stringify(agentIds);
   sql.exec(
     "delete from former_names where agent_id in (select value from json_each(?))",
-    JSON.stringify(agentIds),
+    ids,
+  );
+  if (closed)
+    sql.exec(
+      "delete from rename_rl where agent_id in (select value from json_each(?))",
+      ids,
+    );
+}
+
+/**
+ * R393b: whether a rename would keep the agent's current name, without
+ * assigning one (the rate-limit path): a chosen name equal to it exactly, or
+ * a default whose base the current name was minted from for this agent.
+ */
+function isNoopRename(
+  sql: SqlStorage,
+  agent: AgentRow,
+  proposed: string,
+  kind: NameKind | undefined,
+): boolean {
+  if (kind !== "default") return candidateName(proposed) === agent.name;
+  return (
+    one(
+      sql,
+      "select 1 as x from minted_names where org_id = ? and lname = ? and agent_id = ? and lbase = ? and name = ?",
+      OWNER_ORG_ID,
+      agent.name.toLowerCase(),
+      agent.id,
+      candidateName(proposed).toLowerCase(),
+      agent.name,
+    ) !== null
   );
 }
 
@@ -816,11 +855,16 @@ function mintName(
 /**
  * Writes the minted_names row of a freshly minted name, and drops the
  * agent's former name equal to its new name (a former name never equals the
- * current one, case-insensitively).
+ * current one, case-insensitively). Other agents' DEFAULT former names equal
+ * to it, in the scope nameTaken checks, go too: they are unreserved, so the
+ * new holder supersedes them, and no two agents ever hold one former name in
+ * one scope (a chosen one is reserved, so it cannot be taken).
  */
 function commitName(
   sql: SqlStorage,
   agentId: string,
+  namespace: string,
+  global: boolean,
   a: Assigned,
   now: number,
 ): void {
@@ -834,10 +878,19 @@ function commitName(
       a.mint.lbase,
       now,
     );
+  const lname = a.name.toLowerCase();
   sql.exec(
     "delete from former_names where agent_id = ? and lname = ?",
     agentId,
-    a.name.toLowerCase(),
+    lname,
+  );
+  sql.exec(
+    `delete from former_names where org_id = ? and lname = ? and kind = 'default' and agent_id != ?
+       ${global ? "" : "and agent_id in (select id from agents where org_id = ? and (namespace = ? or global = 1))"}`,
+    OWNER_ORG_ID,
+    lname,
+    agentId,
+    ...(global ? [] : [OWNER_ORG_ID, namespace]),
   );
 }
 
@@ -901,7 +954,15 @@ function agentUp(
       f.global ? 1 : 0,
       now,
     );
-  commitName(sql, id, assigned, now);
+  // A namespace move or a global flip drops the agent's former names: they
+  // were reserved and resolved in the old scope only.
+  if (
+    existing &&
+    (existing.namespace !== f.namespace ||
+      existing.global !== (f.global ? 1 : 0))
+  )
+    dropNameState(sql, [id], false);
+  commitName(sql, id, f.namespace, f.global, assigned, now);
   const wasLive = existing?.live === 1;
   // AC3: a reopened session starts with no status (a live move keeps it).
   if (existing && !wasLive) clearStatus(sql, [id]);
@@ -1440,21 +1501,30 @@ function resolveTarget(
   now: number,
 ): Resolution {
   const lname = toName.toLowerCase();
-  const visibleIn = (ns: string): AgentRow | null =>
-    liveVisibleIn(sql, ns, lname) ??
-    liveFormer(sql, lname, now, { ns })[0] ??
-    null;
+  // A former name is never held by two agents in one scope (commitName);
+  // if it ever were, the send is ambiguous rather than delivered to either.
+  const formerIn = (
+    scope: { ns: string } | { homedIn: string },
+  ): Resolution | null => {
+    const rows = liveFormer(sql, lname, now, scope, 2);
+    const hit = rows[0];
+    if (!hit) return null;
+    return rows.length > 1 ? refused("ambiguous") : { ok: true, agent: hit };
+  };
+  const visibleIn = (ns: string): Resolution | null => {
+    const hit = liveVisibleIn(sql, ns, lname);
+    return hit ? { ok: true, agent: hit } : formerIn({ ns });
+  };
   if (sender.global !== 1) {
     if (toNamespace !== undefined && toNamespace !== sender.namespace) {
       // Only a live global homed in X is reachable. Everything else is the
       // same refusal, so it cannot probe what exists in another namespace.
-      const hit =
-        liveGlobalHomedIn(sql, toNamespace, lname) ??
-        liveFormer(sql, lname, now, { homedIn: toNamespace })[0];
-      return hit ? { ok: true, agent: hit } : refused("other_namespace");
+      const hit = liveGlobalHomedIn(sql, toNamespace, lname);
+      if (hit) return { ok: true, agent: hit };
+      return formerIn({ homedIn: toNamespace }) ?? refused("other_namespace");
     }
     const hit = visibleIn(sender.namespace);
-    if (hit) return { ok: true, agent: hit };
+    if (hit) return hit;
     // B9: the newest closed agent with the name says revoked or closed.
     const gone = goneReason(sql, sender.namespace, lname);
     if (gone) return refused(gone);
@@ -1465,14 +1535,14 @@ function resolveTarget(
   }
   if (toNamespace !== undefined) {
     const hit = visibleIn(toNamespace);
-    if (hit) return { ok: true, agent: hit };
+    if (hit) return hit;
     const gone = goneReason(sql, toNamespace, lname);
     if (gone) return refused(gone);
     return refused("unknown_agent");
   }
   // R393b: the sender's own namespace first, current then former names.
   const own = visibleIn(sender.namespace);
-  if (own) return { ok: true, agent: own };
+  if (own) return own;
   // A live global sorts first and is the only live agent with its name.
   const live = liveAnywhere(sql, lname, 2);
   const first = live[0];
@@ -2016,6 +2086,7 @@ export class Hub extends DurableObject<Env> {
             or exists (select 1 from agents indexed by agents_closed where live = 0)
             or exists (select 1 from agents indexed by agents_status_due where status_due is not null)
             or exists (select 1 from former_names)
+            or exists (select 1 from rename_rl)
             or exists (select 1 from meta where org_id = ? and key >= ? and key < ?)
             or exists (select 1 from meta where org_id = ? and key >= ? and key < ?)) as x`,
       OWNER_ORG_ID,
@@ -2274,7 +2345,7 @@ export class Hub extends DurableObject<Env> {
       )
       .toArray()
       .map((r) => String(r.id));
-    dropFormerNames(sql, ids);
+    dropNameState(sql, ids, true);
     sql.exec(
       "insert into meta (org_id, key, value) values (?, ?, ?) on conflict(org_id, key) do nothing",
       OWNER_ORG_ID,
@@ -2741,6 +2812,27 @@ export class Hub extends DurableObject<Env> {
     const now = this.#now();
     purgeFormerNames(sql, now);
     const global = agent.global === 1;
+    // The rate limit first, so a refused rename assigns nothing. At the limit
+    // a no-op still answers renamed (it never counts).
+    sql.exec(
+      "delete from rename_rl where agent_id = ? and at <= ?",
+      agent.id,
+      now - HOUR_MS,
+    );
+    const count =
+      one<{ n: number }>(
+        sql,
+        "select count(*) as n from rename_rl where agent_id = ?",
+        agent.id,
+      )?.n ?? 0;
+    if (
+      count >= LIMITS.renamesPerHour &&
+      !isNoopRename(sql, agent, f.proposed_name, f.name_kind)
+    ) {
+      logEvent("rate_limited", { kind: "rename", machineId: agent.machineId });
+      sendError(ws, f.id, "rate_limited", RENAME_MESSAGES.rate);
+      return;
+    }
     const assigned = assignName(
       sql,
       agent.namespace,
@@ -2760,22 +2852,6 @@ export class Hub extends DurableObject<Env> {
     } as const;
     if (name === agent.name) {
       sendFrame(ws, reply);
-      return;
-    }
-    sql.exec(
-      "delete from rename_rl where agent_id = ? and at <= ?",
-      agent.id,
-      now - HOUR_MS,
-    );
-    const count =
-      one<{ n: number }>(
-        sql,
-        "select count(*) as n from rename_rl where agent_id = ?",
-        agent.id,
-      )?.n ?? 0;
-    if (count >= LIMITS.renamesPerHour) {
-      logEvent("rate_limited", { kind: "rename", machineId: agent.machineId });
-      sendError(ws, f.id, "rate_limited", RENAME_MESSAGES.rate);
       return;
     }
     sql.exec(
@@ -2818,7 +2894,7 @@ export class Hub extends DurableObject<Env> {
       now,
       agent.id,
     );
-    commitName(sql, agent.id, assigned, now);
+    commitName(sql, agent.id, agent.namespace, global, assigned, now);
     sendFrame(ws, { ...reply, former });
     notifyRoster(this.ctx, { namespaces: [agent.namespace], global }, ws);
     this.#notifyDashboards();
@@ -3345,7 +3421,7 @@ export class Hub extends DurableObject<Env> {
   #closeSessions(agentIds: string[]): void {
     if (agentIds.length === 0) return;
     const sql = this.ctx.storage.sql;
-    dropFormerNames(sql, agentIds);
+    dropNameState(sql, agentIds, true);
     const closedAt = this.#now();
     // M1: the closed rows' purge deadline.
     this.#arm(closedAt + CLOSED_AGENT_RETAIN_MS);
@@ -4012,6 +4088,7 @@ export class Hub extends DurableObject<Env> {
       this.#purgeDeadline(),
       nextStatusDue(sql),
       min("select min(expires_at) as t from former_names"),
+      min("select min(at) as t from rename_rl", HOUR_MS),
     ].filter((t): t is number => t !== null);
     return ts.length === 0 ? null : Math.min(...ts);
   }

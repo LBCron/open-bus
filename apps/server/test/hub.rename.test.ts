@@ -541,6 +541,148 @@ describe("rename (R393b)", () => {
   });
 });
 
+describe("review fixes (R393b)", () => {
+  it("an ordinary send never carries to_name, at any version", async () => {
+    const d = await at();
+    const n = ns("rn");
+    const target = uniq("Plain");
+    await reg(d, "t", target, n);
+    for (const version of ["0.1.0", AGENT_CARD_MIN_CLIENT, RENAME_MIN_CLIENT]) {
+      const s = await at(version);
+      await reg(s, "s", uniq("Sender"), n);
+      for (const to of [target, target.toUpperCase()]) {
+        const rc = await send(s, "s", to);
+        expect(rc.state).toBe("pending");
+        expect(rc).not.toHaveProperty("to_name");
+      }
+      s.close();
+    }
+    d.close();
+  });
+
+  it("a rename of another machine's live agent_ref is not_registered", async () => {
+    const mine = await at();
+    const other = await at();
+    const n = ns("rn");
+    const a = uniq("Theirs");
+    await reg(other, "theirs", a, n);
+    expect(await rename(mine, "theirs", uniq("Stolen"))).toMatchObject({
+      type: "error",
+      code: "not_registered",
+    });
+    const r = await list(other, "theirs");
+    expect(row(r, a)).toBeDefined();
+    mine.close();
+    other.close();
+  });
+
+  it("taking a default former name supersedes it: one holder per scope", async () => {
+    const d = await at();
+    const n = ns("rn");
+    await reg(d, "s", uniq("Sender"), n);
+    const minted = await reg(d, "x", uniq("pi"), n, { kind: "default" });
+    await renamed(d, "x", uniq("Xc"));
+    // Z takes the unreserved name, then leaves it (a chosen former name).
+    expect(await reg(d, "z", minted, n)).toBe(minted);
+    const zc = uniq("Zc");
+    await renamed(d, "z", zc);
+    expect(await send(d, "s", minted)).toMatchObject({
+      state: "pending",
+      to_name: zc,
+    });
+    const holders = await inHub(
+      (_, st) =>
+        st.storage.sql
+          .exec(
+            "select count(*) as n from former_names where lname = ?",
+            minted.toLowerCase(),
+          )
+          .one().n,
+    );
+    expect(holders).toBe(1);
+    d.close();
+  });
+
+  it("two agents holding one former name in a scope is ambiguous, never either", async () => {
+    const d = await at();
+    const n = ns("rn");
+    await reg(d, "s", uniq("Sender"), n);
+    const a = uniq("Twice");
+    await reg(d, "a", a, n);
+    await renamed(d, "a", uniq("A2"));
+    const b2 = uniq("B2");
+    await reg(d, "b", b2, n);
+    // Seeded: commitName and the reservation keep this from happening.
+    await inHub((_, st) =>
+      st.storage.sql.exec(
+        `insert into former_names (agent_id, org_id, name, lname, kind, expires_at)
+         select id, org_id, ?, ?, 'chosen', ? from agents where name = ?`,
+        a,
+        a.toLowerCase(),
+        Date.now() + GRACE,
+        b2,
+      ),
+    );
+    expect(await send(d, "s", a)).toMatchObject({
+      state: "refused",
+      reason: "ambiguous",
+    });
+    d.close();
+  });
+
+  it("a namespace move or global flip drops the agent's former names", async () => {
+    const d = await at();
+    const n1 = ns("rn");
+    const n2 = ns("rn");
+    const foo = uniq("foo");
+    await reg(d, "x", foo, n1);
+    const x2 = uniq("X2");
+    await renamed(d, "x", x2);
+    await reg(d, "y", foo, n2);
+    const y2 = uniq("Y2");
+    await renamed(d, "y", y2);
+    await reg(d, "s", uniq("Sender"), n2);
+    // X flips global: its former `foo` would otherwise be visible in n2.
+    expect(await reg(d, "x", x2, n1, { global: true })).toBe(x2);
+    expect(await formerRows(x2)).toEqual([]);
+    expect(await send(d, "s", foo)).toMatchObject({
+      state: "pending",
+      to_name: y2,
+    });
+    // A namespace move drops them too.
+    const y3 = uniq("Y3");
+    await renamed(d, "y", y3);
+    expect(await formerRows(y3)).toHaveLength(2);
+    expect(await reg(d, "y", y3, n1)).toBe(y3);
+    expect(await formerRows(y3)).toEqual([]);
+    d.close();
+  });
+
+  it("close drops the rename log too", async () => {
+    const d = await at();
+    const n = ns("rn");
+    const a = uniq("Log");
+    await reg(d, "a", a, n);
+    await renamed(d, "a", uniq("Log2"));
+    const log = () =>
+      inHub(
+        (_, st) =>
+          st.storage.sql
+            .exec(
+              "select count(*) as n from rename_rl r join agents a on a.id = r.agent_id where a.native_ref = ? and a.namespace = ?",
+              "a",
+              n,
+            )
+            .one().n,
+      );
+    expect(await log()).toBe(1);
+    d.send({ v: 1, id: id("d"), type: "agent_down", agent_ref: "a" });
+    await reg(d, "b", uniq("Barrier"), n);
+    expect(await log()).toBe(0);
+    d.close();
+  });
+});
+
 describe("default names (R393b)", () => {
   const HEX4 = /-[0-9a-f]{4}$/;
 
