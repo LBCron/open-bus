@@ -11,7 +11,6 @@ export {
   cleanStatusLabel,
   deliveredText,
   displayKind,
-  displayRole,
   earlierStatusText,
   excerptOf,
   fitName,

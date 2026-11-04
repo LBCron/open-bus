@@ -34,11 +34,7 @@ import {
   SENTINEL_HOME,
   sentinelWrites,
 } from "../staging/harness.ts";
-import {
-  type FakeAnthropic,
-  fakeAnthropic,
-  type SeenMessage,
-} from "./fake-anthropic.ts";
+import { type FakeAnthropic, fakeAnthropic } from "./fake-anthropic.ts";
 import {
   codePrompt,
   type FakeModel,
@@ -504,6 +500,61 @@ describe("codex app-server (the desktop app's mode)", () => {
   });
 });
 
+// The desktop app keeps a thread's adapter across an upgrade (#343): one from
+// before C27a sends no item id. old-adapter.mjs drops it and says 0.61.0.
+describe("codex app-server in code mode, with an adapter from before C27a (C27k)", () => {
+  it("is told to restart the Codex app, and nothing is delivered", async () => {
+    const ws = codexWorkspace("cx-stale");
+    const p = await joinPeer("stale", "peer", ws);
+    const old = new URL("./old-adapter.mjs", import.meta.url).href;
+    const app = await appServer(codexBin, ws, env, [
+      "-c",
+      "features.code_mode_only=true",
+      "-c",
+      `mcp_servers.openbus.args=${JSON.stringify(["--import", old, cliBundle, "mcp", "codex"])}`,
+    ]);
+    try {
+      const ready = pastFirstSecond(app.child.pid as number);
+      ready.catch(() => {});
+      model.hold = () => ready;
+      const thread = (
+        await app.request<{ thread: { id: string } }>("thread/start", {
+          cwd: ws,
+          threadSource: "user",
+        })
+      ).thread.id;
+      const from = app.notes.length;
+      await app.request("turn/start", {
+        threadId: thread,
+        input: [
+          {
+            type: "text",
+            text: codePrompt([
+              [["send_message", { to: "peer", text: "from an old adapter" }]],
+            ]),
+            text_elements: [],
+          },
+        ],
+      });
+      await app.next(
+        (n) => n.method === "turn/completed" && n.params?.threadId === thread,
+        from,
+      );
+      const outs = onThread(thread)
+        .filter((s) => s.answers === "exec")
+        .map((s) => s.output ?? "");
+      expect(outs).toHaveLength(1);
+      expect(outs[0]).toContain(
+        "OpenBus did not accept this thread: its OpenBus server is older than the daemon. Ask the user to restart the Codex app.",
+      );
+      expect(outs[0]).toContain(CODEX_REFUSALS.staleAdapter);
+      expect(p.delivered).toEqual([]);
+    } finally {
+      await stop(app.child);
+    }
+  });
+});
+
 // Claude Code, the same way: `claude -p` against a fake Messages API with a
 // dummy key (no login, no network), `open-bus mcp claude` from the bundle.
 describe("claude -p", () => {
@@ -538,7 +589,7 @@ describe("claude -p", () => {
 // AC5d: the agent card end to end. A Codex thread (app-server) and Claude
 // sessions in one namespace; the owner reads and writes through the
 // dashboard's REST with a dev-login session. Status, then the card, then
-// roles, which ends by closing the Codex thread.
+// an adapter below the gate.
 describe("agent card (AC5d)", () => {
   const NS = "cx-card";
   const AUD = "https://artifacts.example.com";
@@ -599,13 +650,6 @@ describe("agent card (AC5d)", () => {
     return outs.map((s) =>
       (s.output ?? "").replace(/^Wall time: [\d.]+ seconds\nOutput:\n/, ""),
     );
-  }
-
-  /** A `claude -p` run that exits 0: each openbus tool's output, in order. */
-  async function claude(prompt: string): Promise<SeenMessage[]> {
-    const from = anthropic.seen.length;
-    expect(await exited(startClaude(anthropic, ws, prompt))).toBe(0);
-    return anthropic.seen.slice(from).filter((s) => s.answers);
   }
 
   /** The owner's REST row for the first agent of `kind` that `ok` accepts. */
@@ -823,77 +867,19 @@ describe("agent card (AC5d)", () => {
     });
   });
 
-  describe("roles", () => {
-    it("the owner points a role at the Codex thread; a send to it reaches the holder", async () => {
-      expect(await owner.putRole(NS, "lane-6", codexId)).toBe(204);
-      await restRow("codex", (a) => a.role === "lane-6");
-      const from = app.notes.length;
-      const outs = await claude("ob-e2e send lane-6 hello holder");
-      const out = (t: string) => outs.find((s) => s.answers === t)?.output;
-      expect(out("list_agents")).toMatch(/^- lane-6 → codex \(codex, cx-card/m);
-      expect(out("send_message")).toBe("✓  Delivered to codex (lane-6).");
-      // The holder is woken with it.
-      await app.next(
-        (n) => n.method === "turn/completed" && n.params?.threadId === thread,
-        from,
-      );
-      expect(
-        model.seen.some(
-          (s) => s.thread === thread && s.user.includes("hello holder"),
-        ),
-      ).toBe(true);
-    });
-
-    it("self in the holder shows the role", async () => {
-      const [out] = await turn([["self", {}]]);
-      expect(out).toContain(`"role": "lane-6"`);
-      expect(out).toContain(
-        "You hold the role lane-6: the user pointed it at you",
-      );
-    });
-
+  describe("below the gate", () => {
     it("an adapter below the gate sees none of the new fields", async () => {
       expect(await rosterRow(p, "codex")).toMatchObject({
-        role: "lane-6",
         status: "working",
       });
       const row = await rosterRow(old, "codex");
       expect(row).toBeDefined();
-      for (const k of ["role", "status", "status_label", "status_at"])
+      for (const k of ["status", "status_label", "status_at"])
         expect(row).not.toHaveProperty(k);
       const self = await old.client.request({ type: "self", card: true });
       expect(self.type === "agent" && Object.keys(self.agent ?? {})).toEqual(
-        expect.not.arrayContaining(["role", "status"]),
+        expect.not.arrayContaining(["status"]),
       );
-    });
-
-    it("after the holder closes, a send to the role is refused role_vacant", async () => {
-      await stop(app.child);
-      await eventually(
-        async () => {
-          if ((await owner.agents(NS)).some((a) => a.kind === "codex"))
-            throw new Error("codex is still open");
-        },
-        { timeoutMs: 30_000 },
-      );
-      const outs = await claude("ob-e2e send lane-6 anyone there");
-      const sent = outs.find((s) => s.answers === "send_message")?.output;
-      expect(sent).toMatch(
-        /^× {2}Refused \(role_vacant\): your message to lane-6/,
-      );
-      expect(sent).toContain("No one holds lane-6 right now.");
-      // Below the gate the same refusal reads as an unknown name.
-      const r = await old.client.request({
-        type: "send",
-        to: "lane-6",
-        body: "anyone there",
-      });
-      expect(r).toMatchObject({
-        type: "receipt",
-        state: "refused",
-        reason: "unknown_agent",
-      });
-      expect(r).not.toHaveProperty("to_name");
     });
   });
 });

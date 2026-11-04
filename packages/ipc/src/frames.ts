@@ -155,7 +155,7 @@ export const Self = z.object({
   type: z.literal("self"),
   /**
    * The `self` tool (AC5c): also look up this agent's own roster row, for its
-   * role and status. Costs a hub round trip, so internal lookups leave it out.
+   * status. Costs a hub round trip, so internal lookups leave it out.
    * Older daemons drop it and answer without them.
    */
   card: z.literal(true).optional(),
@@ -229,10 +229,9 @@ export const AgentInfo = z.object({
   /** The agent's machine (B13); absent when the hub is older. */
   machine_label: MachineLabelSchema.optional(),
   /**
-   * Agent card (AC5a): the owner-set role and the agent's own status claim.
+   * Agent card (AC5a): the agent's own status claim.
    * Only to clients at or above AGENT_CARD_MIN_CLIENT (legacy.ts).
    */
-  role: BusNameSchema.optional(),
   status: StatusStateSchema.optional(),
   status_label: StatusLabelSchema.optional(),
   status_at: IsoTimeSchema.optional(),
@@ -261,8 +260,6 @@ export const Receipt = z.object({
   held: z.literal(true).optional(),
   /** The daemon's own copy for this result: shown as-is, never as an error. */
   text: z.string().min(1).optional(),
-  /** The resolved recipient when it differs from the name sent to: a role's holder, or a renamed agent's current name (#393). Gated like AgentInfo's fields. */
-  to_name: BusNameSchema.optional(),
   ...late,
 });
 export const Roster = z.object({
@@ -359,7 +356,6 @@ export const StatusReply = z.object({
           machine: z.string(),
           state: z.enum(["live", "queued"]),
           /** Agent card (AC5c): gated like AgentInfo's. */
-          role: BusNameSchema.optional(),
           status: StatusStateSchema.optional(),
           status_label: StatusLabelSchema.optional(),
           status_at: IsoTimeSchema.optional(),
