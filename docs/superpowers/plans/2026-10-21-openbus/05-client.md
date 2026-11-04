@@ -4632,7 +4632,7 @@ re-announces the harness name.
   - `former` is the name it left. It is absent on a no-op, i.e. when the assigned name is unchanged.
   - Refusals are `error` with the frame's id: `not_registered` (the agent is not live), `rate_limited` (pinned `RENAME_MESSAGES.rate`), `bad_frame`.
 - **Roster:** `former_names?: [{name, expires_at}]`, newest first, at most `LIMITS.maxFormerNames = 5`. Same on `AgentInfo` (IPC), shown by `self`, `list_agents` and `open-bus status`.
-- **Receipt:** reuse `to_name`. When a send resolves through a former name, `to_name` is the current name, and adapters render "formerly".
+- **Receipt:** `to_name` again, on the IPC receipt (#394 removed the role case, so it now means one thing only). When a send resolves through a former name, `to_name` is the current name, and adapters render "formerly". It is gated like `former_names`: sent to adapters at or above `RENAME_MIN_CLIENT` only, and the daemon drops it below the gate.
 - **IPC:**
   - `rename {name}` is answered by `agent` (the updated self) or `error`.
   - The daemon→adapter push `renamed {name, former?}` goes to persistent links (Pi/omp). It covers a harness or hub-side change.
