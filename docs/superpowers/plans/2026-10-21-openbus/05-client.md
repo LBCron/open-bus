@@ -4648,7 +4648,8 @@ rename, which is kept on disk (#430).
 
 - **Former-name rows:** at most `LIMITS.maxFormerNames` (5) are stored per agent, and the roster shows them all (#446: one agent must not reserve 10 names an hour). Past the cap the oldest **default** row goes: it stops resolving, and the minted rule still keeps the name from anyone else. A **chosen** row is never dropped inside its grace (#449): with 5 chosen names in grace, a rename that would leave a sixth gets `rate_limited` (a rename back to one of them, or a case-only change, still works).
 - **Reservation scope (chosen names only):** the scope `assignName` checks today, i.e. the namespace plus the global set for global agents. A global agent's former name is reserved globally.
-- **Revoke and close** drop former names at once. Mail already queued to the agent stays, since it's keyed by agent id. A close keeps the rename log, so a reopen within the hour is still rate limited (#446). A revoke drops it.
+- **Revoke and close hold names** (#451, user decision 2026-11-04: "when a session leaves a namespace, its current name stays held there for 1 h with no forwarding"). A close (`agent_down`, `sessions` closed, the offline reap) or a revoke holds the current name in its scope for the grace and keeps the chosen former names in grace reserved; neither resolves while the agent is closed (a send gets `closed`/`revoked` or `unknown_agent`). Default former names go. A reopen in the same scope takes the held name back, and its former names resolve again. Mail already queued to the agent stays, since it's keyed by agent id. A close keeps the rename log, so a reopen within the hour is still rate limited (#446). A revoke drops it.
+- **A move or flip holds the name too** (#451): a live namespace move or global flip holds the current name in the old scope (same name, renamed, `-2`, or a `rename_kept` `-2`). A send to it from there is `unknown_agent`, never forwarded. Held rows (`kind = 'held'`) never resolve, even if the agent comes back to that scope under another name, never show in `former_names`, count as reservations for ambiguity but not toward the 5-name room, and are never dropped before their hour. Every scope change (same-name moves and flips included, live or on a reopen) counts in the 10-per-hour rename limit, which bounds holds; past it the `agent_up` succeeds but keeps the agent in its current scope and name, logged `move_kept`. Known limitation: `agent_ok` carries no namespace, so the daemon can't see a kept move (Client follow-up for a signal).
 - **`to_name` gate:** daemons at or above `RENAME_MIN_CLIENT` get the former-name `to_name`. Daemons from 0.55 up to the gate get none, since #394 removed the role case. Below 0.55, nothing changes.
 
 - **De-collision, chosen names:** `assignName(proposed)` with `-2`, `-3`… as today, excluding self. A name taken includes another agent's chosen former names still in grace (agent-bus `_used_names`). The agent's own former names are free to it (A→B→A).
@@ -4656,14 +4657,14 @@ rename, which is kept on disk (#430).
 - **A chosen former name blocks reuse for the whole grace,** by renames and new `agent_up` alike. Otherwise a sender who knew the old name reaches a stranger. A former default name needs no block: it can never be assigned again.
 - **Default naming is a daemon-side fact, not a hub guess.** The hub cannot tell a harness default from a chosen name, so the daemon says which it is: the IPC hello and `rename` carry `name_kind: "default" | "chosen"`, and only a `chosen` name reserves. A daemon below `RENAME_MIN_CLIENT` says nothing, so the hub treats its name as `chosen` — reserving a default name is the safe error.
 - **Grace:** `LIMITS.formerNameGraceMs = 1 h`. This matches agent-bus `FORMER_NAME_GRACE_SECONDS`, and our queued-mail life of 1 h.
-- **Storage:** a table `former_names(agent_id, name, lname, expires_at)`, indexed on `lname`. Expired rows are purged on read and by the existing alarm. An agent's rows are dropped when it closes (`agent_down`, revoke), so the names free at once.
+- **Storage:** a table `former_names(agent_id, name, lname, expires_at)`, indexed on `lname`. Expired rows are purged on read and by the existing alarm. A close keeps an agent's chosen rows and adds a `held` row for its current name (#451); the names free when the grace ends.
 - **Resolution:**
   - The sender's **own namespace first**: a current live name there, then a live former name there. Only then another namespace, where a former name follows the same visibility rules as a current name.
   - Within one namespace, current live names come before former names, then `goneReason`.
   - A former name is never ambiguous: a chosen one cannot be reused inside the grace, and a default one can never be assigned. Across namespaces the usual ambiguity rule still applies.
 - **Rate limit:** 10 name changes per agent per rolling hour. A no-op doesn't count. The 11th gets `rate_limited`. This bounds a tool↔harness loop.
 - **A live `agent_up` that changes the name is a rename** (#446). Daemons below the gate rename this way. It counts in the rate limit and, in an unchanged scope, leaves a former name. Where `rename` would get `rate_limited`, the `agent_up` still succeeds but keeps the current name, because an `agent_up` must never fail. The hub logs `rename_kept`; the daemon is not told, and replays its proposed name on a later `agent_up` (after the hour it goes through). Telling the daemon is Client's, #447.
-- **A reopen under a new name counts too** (#449). A closed agent's `agent_up` with a different name counts in the rate limit, so close and reopen is no way around it, but leaves no former name: the close freed the old name at once, and someone may hold it by now. At the limit the reopen keeps its old name.
+- **A reopen under a new name counts too** (#449). A closed agent's `agent_up` with a different name counts in the rate limit, so close and reopen is no way around it, but leaves no former name: the close already holds the old name for the hour, resolving to no one (#451). At the limit the reopen keeps its old name.
 - **A minted name is never assigned to another agent** (#446), in any scope, during or after its grace. A chosen proposal that matches it is de-collided (`-2`). Its own agent may take it back. An agent that took a minted name through the old hole gets `<name>-2` on its next `agent_up` (a reconnect replays it), leaving no former name, so the hole heals itself and the name goes back to its own agent.
 - **No-op:** proposing the current name returns `renamed` without `former`, and records nothing.
 - **Effects:** the roster is broadcast (`rowChanged`). Status, inbox and session boundary are unchanged.
@@ -4690,7 +4691,7 @@ reads as joining.
   - A→B→A is allowed;
   - the 11th rename is `rate_limited`;
   - a no-op is free;
-  - close drops the former names;
+  - close holds the current name and keeps chosen former names reserved for the hour, resolving to no one (#451);
   - a namespace-hidden former name is `unknown_agent`;
   - a daemon below the gate gets no `former_names` and no `to_name`;
   - `rename` from a non-live agent is `not_registered`;

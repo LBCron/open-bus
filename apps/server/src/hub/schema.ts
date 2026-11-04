@@ -177,12 +177,17 @@ create index if not exists card_rl_at on card_rl(at);
 
 -- R393b (#393): names an agent left by a rename, which still reach it until
 -- expires_at (LIMITS.formerNameGraceMs). kind is the left name's kind:
--- 'chosen' rows are reserved (nameTaken) while live, 'default' rows only
--- resolve (their minted_names row keeps the name from anyone else). An
--- agent's rows go when it closes or is revoked; expired rows are purged on
--- read and by the alarm. Never equal (case-insensitively) to the agent's
--- current name in its scope, distinct per agent and scope (lname), at most
--- LIMITS.maxFormerNames per agent (#446: an older default one is dropped).
+-- 'chosen' rows are reserved (nameTaken), 'default' rows only resolve
+-- (their minted_names row keeps the name from anyone else). #451: 'held'
+-- rows are names an agent left a scope under (a close, revoke, offline reap,
+-- namespace move or global flip): reserved there, never resolving, never on
+-- the roster. A close keeps the chosen rows (reserved, resolving to no one
+-- until a reopen in their scope) and drops the default ones; expired rows
+-- are purged on read and by the alarm. Never equal (case-insensitively) to
+-- the agent's current name in its scope, distinct per agent and scope
+-- (lname), at most LIMITS.maxFormerNames non-held rows per agent (#446: an
+-- older default one is dropped). Held rows are never dropped early; every
+-- scope change counts in rename_rl, which bounds them.
 -- #451: namespace and global are the scope the name was left in (added by
 -- migrateHub on an older hub). A row resolves only while its agent is still
 -- in that scope; after a namespace move or global flip a chosen row stays,
