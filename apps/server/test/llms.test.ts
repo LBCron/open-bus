@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { AGENT_HABITS } from "@ob/shared";
 import { describe, expect, it } from "vitest";
 import { ROUTE_POLICY } from "../src/auth/route-policy.js";
 import type { Env } from "../src/env.js";
@@ -52,11 +53,17 @@ describe("GET /llms.txt", () => {
       "## Restart",
       "## Verify",
       "## Troubleshoot",
+      "## Working with other agents",
     ].map((h) => body.indexOf(h));
     expect(at.every((i) => i >= 0)).toBe(true);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
-    expect(new TextEncoder().encode(body).length).toBeLessThan(2048);
+    expect(new TextEncoder().encode(body).length).toBeLessThan(4096);
     expect(body).not.toMatch(/<\/?(html|body|div|p|a|br|script)\b/i);
+  });
+
+  it("renders every working-with-other-agents habit (#425)", async () => {
+    const body = await (await get("/llms.txt")).text();
+    for (const h of AGENT_HABITS) expect(body).toContain(`\n- ${h}\n`);
   });
 
   it("ignores a spoofed Host header", async () => {
