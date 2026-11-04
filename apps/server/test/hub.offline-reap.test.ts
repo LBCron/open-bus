@@ -237,7 +237,7 @@ describe("offline reap (#422)", () => {
     d2.close();
   });
 
-  it("drops a reaped agent's former names and rename log", async () => {
+  it("drops a reaped agent's former names; its rename log stays to expire (#446)", async () => {
     const t0 = base();
     await setClock(t0);
     const m = await machine("Renamed");
@@ -290,7 +290,8 @@ describe("offline reap (#422)", () => {
     await alarmAtTime(t0 + OFFLINE_REAP_MS);
     expect(await liveOf(m.id)).toEqual([]);
     expect(await count("former_names")).toBe(0);
-    expect(await count("rename_rl")).toBe(0);
+    // A close keeps the rename log (#446): the rolling hour purges it.
+    expect(await count("rename_rl")).toBeGreaterThan(0);
   });
 
   it("an offline machine with no live agents arms no reap deadline", async () => {

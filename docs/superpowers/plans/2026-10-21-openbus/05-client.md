@@ -4646,9 +4646,9 @@ rename, which is kept on disk (#430).
 
 ### Hub rules (Backend)
 
-- **Former-name rows:** 10 renames an hour with a 1 h grace allow up to 10 live former names per agent. The roster shows the newest 5. Resolution, and reservation for the chosen ones, use every live row, so trimming at 5 never frees a name early.
+- **Former-name rows:** at most `LIMITS.maxFormerNames` (5) are stored per agent, and the roster shows them all. A rename past the cap drops the oldest row, so that name stops resolving and is free again before its grace ends (#446: one agent must not reserve 10 names an hour).
 - **Reservation scope (chosen names only):** the scope `assignName` checks today, i.e. the namespace plus the global set for global agents. A global agent's former name is reserved globally.
-- **Revoke and close** drop former names at once. Mail already queued to the agent stays, since it's keyed by agent id.
+- **Revoke and close** drop former names at once. Mail already queued to the agent stays, since it's keyed by agent id. A close keeps the rename log, so a reopen within the hour is still rate limited (#446). A revoke drops it.
 - **`to_name` gate:** daemons at or above `RENAME_MIN_CLIENT` get the former-name `to_name`. Daemons from 0.55 up to the gate get none, since #394 removed the role case. Below 0.55, nothing changes.
 
 - **De-collision, chosen names:** `assignName(proposed)` with `-2`, `-3`… as today, excluding self. A name taken includes another agent's chosen former names still in grace (agent-bus `_used_names`). The agent's own former names are free to it (A→B→A).
@@ -4662,6 +4662,8 @@ rename, which is kept on disk (#430).
   - Within one namespace, current live names come before former names, then `goneReason`.
   - A former name is never ambiguous: a chosen one cannot be reused inside the grace, and a default one can never be assigned. Across namespaces the usual ambiguity rule still applies.
 - **Rate limit:** 10 name changes per agent per rolling hour. A no-op doesn't count. The 11th gets `rate_limited`. This bounds a tool↔harness loop.
+- **A live `agent_up` that changes the name is a rename** (#446). Daemons below the gate rename this way. It counts in the rate limit and, in an unchanged scope, leaves a former name. At the limit the `agent_up` still succeeds but keeps the current name, because an `agent_up` must never fail.
+- **A minted name is never assigned to another agent** (#446), in any scope, during or after its grace. A chosen proposal that matches it is de-collided (`-2`). Its own agent may take it back.
 - **No-op:** proposing the current name returns `renamed` without `former`, and records nothing.
 - **Effects:** the roster is broadcast (`rowChanged`). Status, inbox and session boundary are unchanged.
 - **#394:** R393b rebases on it. `roleTaken` and `resolveRole` are gone, and `to_name` means only "resolved under a different name". If #394 slips, R393b keeps `roleTaken` in `nameTaken` and gives role resolution priority over former names.
@@ -4692,7 +4694,7 @@ reads as joining.
   - a daemon below the gate gets no `former_names` and no `to_name`;
   - `rename` from a non-live agent is `not_registered`;
   - a default name gets a `-<4 hex>` suffix and that exact name is never assigned again (a second session proposing the same default gets a different one);
-  - a former default name resolves for the grace but is not reserved: a chosen name may take it, and resolution then prefers the live one in the sender's namespace;
+  - a former default name resolves for the grace and needs no reservation: a chosen proposal of it gets `<name>-2`, because a minted name is never assigned to another agent (#446);
   - a former chosen name is unreserved to nobody: a new agent asking for it gets `<name>-2`;
   - resolution order: a name that exists as a former name in the sender's namespace and as a current name in another resolves to the sender's own.
 - **R393c, Client (daemon, IPC, CLI status):** `harnessName` edges, the IPC `rename`, the `renamed` push, a hello `proposed_name` change on a live agent, `syncClaude` rename, the old-hub `agent_up` fallback, gating, `name_kind` (Backend's #416: on `agent_up` and `rename`, sent only to a hub at or above `RENAME_MIN_CLIENT`; absent means `chosen`), and `open-bus status` "(was x)". Tests:
