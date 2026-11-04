@@ -1046,6 +1046,13 @@ describe("status, as Pi shows it (AC5c)", () => {
     expect(out).not.toMatch(/role|lane-6/);
   });
 
+  it("self without a status shows the entry alone", async () => {
+    const { p } = await started((f) =>
+      f.type === "self" ? { type: "agent", agent: row({}) } : undefined,
+    );
+    expect(await p.call("self", {})).toBe(JSON.stringify(row({}), null, 2));
+  });
+
   it("send_message: names the target, ignoring an old hub's to_name", async () => {
     const { p } = await started((f) =>
       f.type === "send"

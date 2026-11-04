@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { daemonStatus, LineDecoder } from "@ob/ipc";
+import { DaemonFrame, daemonStatus, LineDecoder } from "@ob/ipc";
 import {
   AGENT_CARD_MIN_CLIENT,
   CARD_REFUSAL_CODES,
@@ -489,6 +489,8 @@ async function cardHub(reason = "ambiguous") {
         msg_id: "mmmmmmmmmmmmmmm1",
         state: "refused",
         reason,
+        // An old hub still names the role's holder; no client should see it.
+        to_name: "lane-6",
       });
   });
   return h;
@@ -521,10 +523,13 @@ describe("roster status (AC5a)", () => {
       state: "refused",
       reason: "ambiguous",
     });
+    expect(byType(frames, "receipt")).not.toHaveProperty("to_name");
     expect(byType(frames, "agent")).toMatchObject({ daemon_version: GATE });
   });
 
   it("an old hub's role_vacant reaches every client as unknown_agent", async () => {
+    // Each marker decodes what it gets: the payload must stay legal for a
+    // frozen client, and the gate one for today's schema.
     for (const marker of [GATE, "0.53.0", undefined]) {
       const h = await cardHub("role_vacant");
       const frames = await talk(
@@ -532,6 +537,8 @@ describe("roster status (AC5a)", () => {
         [helloOf("ses_rv", marker), asks[1]],
         2,
       );
+      const V = marker === GATE ? { DaemonFrame } : marker ? V0540 : V0441;
+      for (const f of frames) V.DaemonFrame.parse(f);
       expect(byType(frames, "receipt")).toMatchObject({
         state: "refused",
         reason: "unknown_agent",
@@ -551,6 +558,7 @@ describe("roster status (AC5a)", () => {
       4,
     );
     for (const f of frames) V.DaemonFrame.parse(f);
+    expect(byType(frames, "receipt")).not.toHaveProperty("to_name");
     const roster = byType(frames, "roster");
     expect(roster.agents?.[0]).not.toHaveProperty("role");
     expect(roster.agents?.[0]).not.toHaveProperty("status");

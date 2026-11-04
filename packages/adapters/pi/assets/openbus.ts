@@ -181,8 +181,11 @@ function receiptText(
       return fitLine((v) => quoted(head(v), quote, tail(v)), to);
     }
     default: {
-      const copy = r.reason ? refusals[r.reason] : undefined;
-      const label = r.reason ? `Refused (${r.reason})` : "Refused";
+      // A `role_vacant` from a pre-#394 hub is not in the reason list any more
+      // (#394), and a replay or an update can still carry it.
+      const reason = r.reason === "role_vacant" ? "unknown_agent" : r.reason;
+      const copy = reason ? refusals[reason] : undefined;
+      const label = reason ? `Refused (${reason})` : "Refused";
       const [detail, hint] = copy ?? [null, "Message another agent."];
       const said = (v: string) =>
         typeof detail === "function" ? detail(namespaces, v) : detail;

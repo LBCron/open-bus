@@ -34,11 +34,7 @@ import {
   SENTINEL_HOME,
   sentinelWrites,
 } from "../staging/harness.ts";
-import {
-  type FakeAnthropic,
-  fakeAnthropic,
-  type SeenMessage,
-} from "./fake-anthropic.ts";
+import { type FakeAnthropic, fakeAnthropic } from "./fake-anthropic.ts";
 import {
   codePrompt,
   type FakeModel,
@@ -599,13 +595,6 @@ describe("agent card (AC5d)", () => {
     return outs.map((s) =>
       (s.output ?? "").replace(/^Wall time: [\d.]+ seconds\nOutput:\n/, ""),
     );
-  }
-
-  /** A `claude -p` run that exits 0: each openbus tool's output, in order. */
-  async function _claude(prompt: string): Promise<SeenMessage[]> {
-    const from = anthropic.seen.length;
-    expect(await exited(startClaude(anthropic, ws, prompt))).toBe(0);
-    return anthropic.seen.slice(from).filter((s) => s.answers);
   }
 
   /** The owner's REST row for the first agent of `kind` that `ok` accepts. */

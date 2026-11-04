@@ -1,4 +1,4 @@
-// AC5c: the self tool's role and status, and `open-bus status` rows, from the hub roster.
+// AC5c: the self tool's status, and `open-bus status` rows, from the hub roster.
 import { connect } from "node:net";
 import { daemonStatus, LineDecoder } from "@ob/ipc";
 import { AGENT_CARD_MIN_CLIENT } from "@ob/shared";

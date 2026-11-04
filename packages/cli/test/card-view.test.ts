@@ -20,7 +20,7 @@ const row = (r: Record<string, unknown>) => ({
 });
 
 describe("status roster with status (AC5c)", () => {
-  it("a `role` from an old hub shows nothing: no role column, no role text", () => {
+  it("a `role` from an old daemon shows nothing: no role column, no role text", () => {
     const c = ctx();
     const { lines } = rosterBlock(c, {
       namespace: "ns",

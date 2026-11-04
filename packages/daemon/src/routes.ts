@@ -92,7 +92,12 @@ export class Pending {
       return ok !== false;
     }
     // The hub's roster names agents `bus_name`; adapters see `name`, `state` and `live`.
-    // A `role` from an old hub is dropped.
+    // A `role` from an old hub is dropped, and so is a receipt's `to_name`: it
+    // names a role's holder, and roles are gone (#394).
+    if (frame.type === "receipt") {
+      const { to_name: _to, ...receipt } = frame;
+      return w.reply({ ...receipt, id: w.localId }) !== false;
+    }
     const ok = w.reply(
       frame.type === "roster"
         ? {
