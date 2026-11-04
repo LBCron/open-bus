@@ -414,7 +414,14 @@ describe("design/screens/live.html (D5)", () => {
   });
 
   it("speaks only Live and Queued, each a badge with its word", () => {
-    expect(live).not.toMatch(/\b(away|idle)\b/i);
+    // Idle is only ever what an agent says (D16), never a Reachable word.
+    const claims = live
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(
+        /data-says="idle" class="[^"]*"><span class="sr-only">agent says: <\/span>Idle</g,
+        "",
+      );
+    expect(claims).not.toMatch(/\b(away|idle)\b/i);
     const words: Record<string, string> = {
       live: "Live",
       queued: "Queued",
@@ -530,7 +537,7 @@ describe("design/screens/live.html (D5)", () => {
   it("says when a filter matches nothing, reachable at ns=medical-wiki&filter=live", () => {
     const empties =
       live.match(
-        /<tr data-filter-empty[\s\S]*?>\s*<td data-slot="table-cell" colspan="5" class="[^"]*">No agents match this filter\.<\/td>\s*<\/tr>/g,
+        /<tr data-filter-empty[\s\S]*?>\s*<td data-slot="table-cell" colspan="6" class="[^"]*">No agents match this filter\.<\/td>\s*<\/tr>/g,
       ) ?? [];
     expect(empties.length).toBe(2);
     expect(
@@ -560,5 +567,254 @@ describe("design/screens/live.html (D5)", () => {
     for (const c of nsChips) expect(c.split(" ")).toContain("h-auto");
     expect(nsChips[0].split(" ")).toContain("hover:bg-muted");
     expect(nsChips[2].split(" ")).toContain("hover:bg-(--ob-accent-soft)");
+  });
+});
+
+describe("design/screens/live.html status column (D16)", () => {
+  const heads = [...live.matchAll(/<thead\b[\s\S]*?<\/thead>/g)].map(
+    (m) => m[0],
+  );
+  const badges = [
+    ...live.matchAll(
+      /<span data-slot="badge" data-variant="agent-says" data-says="(\w+)" class="([^"]*)"><span class="sr-only">agent says: <\/span>([^<]+)<\/span>/g,
+    ),
+  ].map((m) => ({ state: m[1], cls: m[2].split(" "), word: m[3] }));
+
+  it("puts Status after Kind in every table, tagged agent says once", () => {
+    expect(heads.length).toBe(3);
+    for (const h of heads) {
+      const cols = [
+        ...h.matchAll(/<th data-slot="table-head" class="[^"]*">(.*?)<\/th>/g),
+      ].map((m) =>
+        m[1]
+          .replace(/<[^>]+>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim(),
+      );
+      expect(cols.slice(0, 4)).toEqual([
+        "Agent",
+        "Kind",
+        "Status agent says",
+        "Machine",
+      ]);
+      expect(h.match(/agent says/g)?.length).toBe(1);
+    }
+  });
+
+  it("gives every roster row one status cell, folded under the name below md", () => {
+    for (const r of liveRows) {
+      const cell =
+        /<td data-slot="table-cell" class="[^"]*max-md:row-start-3[^"]*">([\s\S]*?)<\/td>/.exec(
+          r,
+        )?.[1] ?? "";
+      expect(cell).toContain(
+        '<span aria-hidden="true" class="text-muted-foreground md:hidden">Status (agent says) </span>',
+      );
+      expect(cell).toContain('data-says-in="');
+      expect(r).toMatch(
+        /max-md:row-start-4[^"]*"><span class="text-muted-foreground md:hidden">Machine /,
+      );
+    }
+  });
+
+  it("draws status as a dashed, unfilled outline Badge with its word, never a Reachable badge", () => {
+    const words: Record<string, string> = {
+      working: "Working",
+      idle: "Idle",
+      blocked: "Blocked",
+      waiting_on_owner: "Waiting on you",
+    };
+    expect(new Set(badges.map((b) => b.state))).toEqual(
+      new Set([...Object.keys(words), "reviewing"]),
+    );
+    for (const b of badges) {
+      expect(b.cls).toEqual(
+        expect.arrayContaining(["border", "border-dashed", "bg-transparent"]),
+      );
+      expect(b.cls.some((c) => /^bg-\(--ob-/.test(c))).toBe(false);
+      // A newer state shows its raw token.
+      expect(b.word).toBe(words[b.state] ?? b.state);
+    }
+  });
+
+  it("offers status=default|none|long|unknown, with a 64-character label and None", () => {
+    expect(live).toContain('status: ["default", "none", "long", "unknown"]');
+    const long = [
+      ...live.matchAll(/<div data-says-in="long"[\s\S]*?<bdi>([^<]+)<\/bdi>/g),
+    ].map((m) => m[1]);
+    expect(long.length).toBeGreaterThan(0);
+    for (const l of long) expect(l.length).toBe(64);
+    expect(live).toMatch(
+      /data-says-in="unknown"[^>]*>.*?data-says="reviewing"/,
+    );
+    const nones =
+      live.match(
+        /<span data-says-in="[^"]*" role="img" aria-label="No status" class="text-muted-foreground">None<\/span>/g,
+      ) ?? [];
+    expect(nones.length).toBe(liveRows.length);
+  });
+});
+
+const settingsFile = new URL(
+  "../../../design/screens/settings.html",
+  import.meta.url,
+);
+const settings = readFileSync(settingsFile, "utf8");
+
+describe("design/screens/settings.html (D16)", () => {
+  it("links the tokens and its generated Tailwind CSS", () => {
+    expect(settings).toContain('<link rel="stylesheet" href="settings.css">');
+    const css = readFileSync(
+      new URL("../../../design/screens/settings.css", import.meta.url),
+      "utf8",
+    );
+    expect(css).toMatch(/^\/\* Generated[\s\S]*settings\.html/);
+  });
+
+  it("navigates Machines, Agents, Settings, with Settings current", () => {
+    const nav =
+      /<nav aria-label="Main">[\s\S]*?<\/nav>/.exec(settings)?.[0] ?? "";
+    expect([...nav.matchAll(/<span>(\w+)<\/span>/g)].map((m) => m[1])).toEqual([
+      "Machines",
+      "Agents",
+      "Settings",
+    ]);
+    expect(nav).toMatch(/href="settings.html" aria-current="page"/);
+    for (const page of [live, machines])
+      expect(page).toContain('<a href="settings.html"');
+  });
+
+  it("lists each aud whole, mono, in <bdi>, never as a link", () => {
+    const auds = [...settings.matchAll(/<li data-app="([^"]+)"/g)].map(
+      (m) => m[1],
+    );
+    expect(auds).toEqual([
+      "https://artifacts.leourbina.com",
+      "https://xn--bcher-kva.example",
+      "https://staging.artifacts.leourbina.com:8443",
+    ]);
+    for (const a of auds) {
+      expect(settings).toContain(
+        `<bdi class="block font-mono text-sm [overflow-wrap:anywhere]">${a}</bdi>`,
+      );
+      expect(settings).toContain(`aria-label="Unlink ${a}"`);
+      expect(settings).not.toContain(`href="${a}`);
+    }
+  });
+
+  it("has every state, the unlink confirm and the toast", () => {
+    for (const s of ["default", "empty", "loading", "error"])
+      expect(settings).toContain(`data-show="${s}"`);
+    expect(settings).toContain(">No linked apps</h3>");
+    expect(settings).toContain("Link one from the app's settings.");
+    expect(settings).toContain("Couldn't load linked apps");
+    expect(settings).toMatch(/role="alertdialog" aria-modal="true"/);
+    expect(settings).toMatch(
+      /Unlink <bdi data-confirm-aud class="font-mono">https:\/\/artifacts\.leourbina\.com<\/bdi>\?<\/h2>/,
+    );
+    expect(settings).toContain(
+      "can no longer verify your agents' cards. Cards it already has expire within 5 minutes.",
+    );
+    expect(settings).toContain(">Cancel</button>");
+    expect(settings).toMatch(
+      /Unlinked <bdi data-toast-host class="font-mono">https:\/\/artifacts\.leourbina\.com<\/bdi>\./,
+    );
+  });
+
+  it("has no em dashes, no new tabs and no role", () => {
+    for (const page of [settings, live]) {
+      expect(page).not.toContain("—");
+      expect(page).not.toContain('target="_blank"');
+      expect(
+        page.replace(
+          /<!--[\s\S]*?-->|role="[^"]*"|\[role="?\w+"?\]|"role"/g,
+          "",
+        ),
+      ).not.toMatch(/\broles?\b/i);
+    }
+  });
+});
+
+const linkFile = new URL(
+  "../../../design/screens/link-confirm.html",
+  import.meta.url,
+);
+const link = readFileSync(linkFile, "utf8");
+
+describe("design/screens/link-confirm.html is the Worker's /link template (D16)", () => {
+  const max: Record<string, string> = {
+    aud: `https://${"h".repeat(253)}:65535`,
+    aud_host: `${"h".repeat(253)}:65535`,
+    bus_host: "h".repeat(253),
+    user_email: `${"u".repeat(242)}@example.com`,
+    form_action: "f".repeat(64),
+    csrf_token: "c".repeat(64),
+    switch_url: "s".repeat(200),
+  };
+  const served = link
+    .replace(/^(<!doctype html>\n)<!--.*?-->\n/s, "$1")
+    .replace(/\{\{(\w+)\}\}/g, (_, k: string) => max[k]);
+  const size = new TextEncoder().encode(served).length;
+
+  it("stays under 8 KB served, and states that size in its header", () => {
+    expect(served).not.toMatch(/<!--|\{\{/);
+    expect(size).toBeLessThan(8192);
+    expect(link).toContain(`${size} B, under 8 KB`);
+  });
+
+  it("has no JavaScript and no external requests, prefers-color-scheme only", () => {
+    expect(link).not.toMatch(/<script|javascript:/i);
+    expect(link).not.toMatch(/https?:\/\/(?!artifacts|xn--)/);
+    expect(link).not.toMatch(/@import|url\(/);
+    expect(link).toMatch(/prefers-color-scheme only/);
+    expect(link).toMatch(/HTML-escape every value/);
+  });
+
+  it("offers exactly the approved placeholder set", () => {
+    const used = [
+      ...new Set([...link.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1])),
+    ].sort();
+    expect(used).toEqual(Object.keys(max).sort());
+  });
+
+  it("posts allow or cancel with CSRF, Cancel then Allow", () => {
+    expect(link).toMatch(/method="post" action="\{\{form_action\}\}"/);
+    expect(link).toMatch(/name="csrf" value="\{\{csrf_token\}\}"/);
+    expect(link).toMatch(
+      /data-variant="outline"[^>]*value="cancel">Cancel<\/button><button[^>]*data-variant="default"[^>]*value="allow">Allow<\/button>/,
+    );
+  });
+
+  it("shows the aud whole, mono, in <bdi>, never as a link, and isolates every value", () => {
+    const body = link
+      .replace(/<!--.*?-->/s, "")
+      .replace(/<title>.*?<\/title>/s, "");
+    expect(body).toContain('<b class="mono"><bdi>{{aud}}</bdi></b>');
+    expect(body).not.toMatch(/href="\{\{aud/);
+    for (const p of ["aud", "aud_host", "bus_host", "user_email"]) {
+      const all = body.match(new RegExp(`\\{\\{${p}\\}\\}`, "g")) ?? [];
+      const iso =
+        body.match(new RegExp(`<bdi>\\{\\{${p}\\}\\}</bdi>`, "g")) ?? [];
+      expect(all.length, p).toBeGreaterThan(0);
+      expect(iso.length, p).toBe(all.length);
+    }
+  });
+
+  it("carries the 4A copy", () => {
+    for (const s of [
+      "Let <bdi>{{aud_host}}</bdi> verify your agents' cards?",
+      "<b>The agent's name, kind and machine</b><small>Signed by your bus, so it can show them as attested.</small>",
+      "<b>What the agent says it's doing</b><small>Marked as reported by the agent, never as fact.</small>",
+      '<li class="no"><p><b>Never your email or namespaces</b><small>It gets an id for you that only it uses.</small>',
+      "Signed in as <b><bdi>{{user_email}}</bdi></b>",
+      "You can unlink it any time in Settings.",
+    ])
+      expect(link).toContain(s);
+    expect(link).not.toContain("—");
+    expect(link.replace(/role="[^"]*"/g, "")).not.toMatch(/\broles?\b/i);
+  });
+
+  it("defines every class it uses in the inline <style>", () => {
+    expect(undefinedClasses(link)).toEqual([]);
   });
 });

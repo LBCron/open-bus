@@ -5,16 +5,12 @@ import {
   AgentsResponseSchema,
   type BusEvent,
   BusEventSchema,
-  BusNameSchema,
   CSRF_HEADER,
   CSRF_VALUE,
-  LIMITS,
   type LinkedApp,
   type Machine,
   MachinesResponseSchema,
-  PutRoleBodySchema,
   R,
-  type Role,
   WireNamespaceSchema,
 } from "../api/contract";
 import { fixtures } from "./fixtures";
@@ -49,28 +45,7 @@ export function createMockBus() {
         ? { ...a, status: "idle", statusAt: T }
         : a,
   );
-  const holder = fixtures.agents[0];
-  let roleRows: Role[] = [
-    {
-      namespace: holder?.namespace ?? "github.com/acme/app",
-      role: "lane-6",
-      agentId: holder?.id ?? null,
-      setAt: T,
-    },
-    {
-      namespace: "github.com/acme/app",
-      role: "reviewer",
-      agentId: null,
-      setAt: T,
-    },
-  ];
   let appRows: LinkedApp[] = [{ aud: "https://oa.example", linkedAt: T }];
-  const withRoles = (): Agent[] =>
-    agentRows.map((a) => {
-      const r = roleRows.find((x) => x.agentId === a.id);
-      // A role injected through setAgents stays when no role row claims the agent.
-      return r ? { ...a, role: r.role } : a;
-    });
   const subscribers = new Set<(e: BusEvent) => void>();
 
   // Like the hub: active machines first, then revoked, each newest first.
@@ -82,8 +57,7 @@ export function createMockBus() {
         Number(a.revokedAt !== null) - Number(b.revokedAt !== null) ||
         b.createdAt.localeCompare(a.createdAt),
     );
-  const agents = () => withRoles();
-  const roles = () => [...roleRows];
+  const agents = () => [...agentRows];
   const apps = () => [...appRows];
 
   /** Every frame goes through the schema, so a bad e2e push throws here. */
@@ -134,68 +108,7 @@ export function createMockBus() {
       push({ type: "machines", machines: machines() });
       return new HttpResponse(null, { status: 204 });
     },
-    roles,
     apps,
-    /**
-     * PUT /api/v1/roles/:ns/:role. 400 when the holder is not an open agent in
-     * scope; 409 when the role is an open agent's name or the agent already
-     * holds another role, or the bus already has `LIMITS.maxRoles` roles.
-     */
-    async setRole(namespace: string, role: string, body: unknown) {
-      if (!WireNamespaceSchema.safeParse(namespace).success)
-        return fail(400, "bad_request", "Invalid namespace", {
-          field: "namespace",
-        });
-      if (!BusNameSchema.safeParse(role).success)
-        return fail(400, "bad_request", "Invalid role name", { field: "role" });
-      const parsed = PutRoleBodySchema.safeParse(body);
-      const holder = parsed.success
-        ? agentRows.find((a) => a.id === parsed.data.agentId)
-        : undefined;
-      if (!holder || !(holder.namespace === namespace || holder.global))
-        return fail(
-          400,
-          "bad_request",
-          "That agent is not open in this namespace",
-          {
-            field: "agentId",
-          },
-        );
-      // The server's exact 409s (apps/server/src/routes/roles.ts).
-      if (agentRows.some((a) => a.name === role && a.namespace === namespace))
-        return fail(409, "conflict", "An agent already has that name");
-      if (roleRows.some((r) => r.agentId === holder.id && r.role !== role))
-        return fail(409, "conflict", "That agent already has a role");
-      if (
-        roleRows.length >= LIMITS.maxRoles &&
-        !roleRows.some((r) => r.namespace === namespace && r.role === role)
-      )
-        return fail(409, "conflict", "Too many roles");
-      const row: Role = {
-        namespace,
-        role,
-        agentId: holder.id,
-        setAt: new Date().toISOString(),
-      };
-      roleRows = [
-        ...roleRows.filter(
-          (r) => !(r.namespace === namespace && r.role === role),
-        ),
-        row,
-      ];
-      push({ type: "agents", agents: agents() });
-      return new HttpResponse(null, { status: 204 });
-    },
-    /** DELETE /api/v1/roles/:ns/:role: 204, or 404 when already gone. */
-    async removeRole(namespace: string, role: string) {
-      if (!roleRows.some((r) => r.namespace === namespace && r.role === role))
-        return fail(404, "not_found", "No such role");
-      roleRows = roleRows.filter(
-        (r) => !(r.namespace === namespace && r.role === role),
-      );
-      push({ type: "agents", agents: agents() });
-      return new HttpResponse(null, { status: 204 });
-    },
     /** DELETE /api/v1/linked-apps/:aud: 204, or 404 when already gone. */
     async unlink(aud: string) {
       if (!appRows.some((a) => a.aud === aud))
@@ -221,7 +134,7 @@ export function createMockBus() {
 
 export type MockBus = ReturnType<typeof createMockBus>;
 
-/** Handlers: me, machines, agents, revoke, roles, linked apps, and the events WebSocket. */
+/** Handlers: me, machines, agents, revoke, linked apps, and the events WebSocket. */
 export function handlersFor(bus: MockBus) {
   return [
     http.get("*/api/v1/me", () => HttpResponse.json(fixtures.me)),
@@ -251,27 +164,6 @@ export function handlersFor(bus: MockBus) {
         return fail(403, "csrf", `Missing ${CSRF_HEADER} header`);
       }
       return bus.revoke(String(params.id));
-    }),
-    http.get("*/api/v1/roles", () => HttpResponse.json({ roles: bus.roles() })),
-    http.put("*/api/v1/roles/:ns/:role", async ({ request, params }) => {
-      if (request.headers.get(CSRF_HEADER) !== CSRF_VALUE) {
-        return fail(403, "csrf", `Missing ${CSRF_HEADER} header`);
-      }
-      const body = await request.json().catch(() => undefined);
-      return bus.setRole(
-        decodeURIComponent(String(params.ns)),
-        decodeURIComponent(String(params.role)),
-        body,
-      );
-    }),
-    http.delete("*/api/v1/roles/:ns/:role", ({ request, params }) => {
-      if (request.headers.get(CSRF_HEADER) !== CSRF_VALUE) {
-        return fail(403, "csrf", `Missing ${CSRF_HEADER} header`);
-      }
-      return bus.removeRole(
-        decodeURIComponent(String(params.ns)),
-        decodeURIComponent(String(params.role)),
-      );
     }),
     http.get("*/api/v1/linked-apps", () =>
       HttpResponse.json({ apps: bus.apps() }),

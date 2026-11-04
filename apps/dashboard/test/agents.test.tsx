@@ -137,7 +137,7 @@ test("the header names the page; the first namespace's agents fill the table, li
   for (const head of [
     "Agent",
     "Kind",
-    "Status (agent says)",
+    "Status, agent says",
     "Machine",
     "Reachable",
     "Updated",
@@ -752,8 +752,11 @@ test("the status column is tagged agent says; blocked, its label and its age sho
   await screen.findByText("claude-1");
   const table = screen.getByRole("table", { name: NS_TABLE });
   expect(
-    within(table).getByRole("columnheader", { name: "Status (agent says)" }),
+    within(table).getByRole("columnheader", { name: "Status, agent says" }),
   ).toBeInTheDocument();
+  expect(table.querySelector("th [data-agent-says-tag]")).toHaveTextContent(
+    "agent says",
+  );
   await push([
     agent({
       id: CLAUDE.id,
@@ -823,8 +826,8 @@ test("a status label is text, wraps, and a feed frame updates the cell without a
     }),
   ]);
   await waitFor(() => expect(statusCell("claude-1")).toHaveTextContent("Idle"));
-  const cell = within(statusCell("claude-1")).getByText(long);
-  expect(cell.className).toContain("[overflow-wrap:anywhere]");
+  const cell = within(statusCell("claude-1")).getByText(long).parentElement;
+  expect(cell?.className).toContain("[overflow-wrap:anywhere]");
   expect(gets.seen.gets).toBe(0);
   await gets.release();
 });

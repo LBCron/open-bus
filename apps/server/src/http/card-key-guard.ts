@@ -24,7 +24,7 @@ export function onTestCardKey(env: Env): boolean {
 let logged = false;
 
 /**
- * 503 on everything but GET /healthz, which keeps answering with
+ * 503 on everything but GET or HEAD /healthz, which keeps answering with
  * `problem: "test_card_key"` so `status` and `doctor` can say why and how to
  * fix it. Never a silent outage, and never any key material in the log.
  */
@@ -37,7 +37,10 @@ export const cardKeyGuard =
         action: "refusing requests; see docs/ops/releases.md",
       });
     }
-    if (c.req.method === "GET" && new URL(c.req.url).pathname === "/healthz")
+    if (
+      (c.req.method === "GET" || c.req.method === "HEAD") &&
+      new URL(c.req.url).pathname === "/healthz"
+    )
       return next();
     // The standard envelope (the SPA and CLI parse it), as the JWKS 503 does.
     return errorJson(

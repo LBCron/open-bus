@@ -25,10 +25,7 @@ export {
   MachinesResponseSchema,
   type Me,
   MeSchema,
-  PutRoleBodySchema,
   R,
-  type Role,
-  RolesResponseSchema,
   type StatusState,
   WireNamespaceSchema,
 } from "@ob/shared/web";

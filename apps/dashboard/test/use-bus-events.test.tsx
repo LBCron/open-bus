@@ -78,30 +78,30 @@ test("a snapshot is written into its own cache only", async () => {
 const listGets = (invalidate: ReturnType<typeof vi.fn>) =>
   invalidate.mock.calls
     .map(([f]) => (f as { queryKey: readonly string[] }).queryKey[0])
-    .filter((k) => k !== qk.me[0] && k !== qk.roles[0]);
+    .filter((k) => k !== qk.me[0]);
 
-/** Every key invalidated, roles included. */
+/** Every key invalidated. */
 const keys = (invalidate: ReturnType<typeof vi.fn>) =>
   invalidate.mock.calls.map(
     ([f]) => (f as { queryKey: readonly string[] }).queryKey[0],
   );
 
-test("an unknown frame refetches roles with the lists: role holders ride on the roster", () => {
+test("an unknown frame refetches the lists", () => {
   const { invalidate } = setup();
   act(() => lastSocket().push({ type: "roster_changed" }));
   act(() => {
     vi.advanceTimersByTime(1_000);
   });
-  expect(keys(invalidate).sort()).toEqual(["agents", "machines", "roles"]);
+  expect(keys(invalidate).sort()).toEqual(["agents", "machines"]);
 });
 
-test("a missed agents greeting refetches roles too; a missed machines one doesn't", async () => {
+test("a missed agents greeting refetches the lists; a missed machines one doesn't", async () => {
   const { invalidate } = setup();
   act(() => lastSocket().push({ type: "hello" }));
   act(() => {
     vi.advanceTimersByTime(1_000);
   });
-  expect(keys(invalidate).sort()).toEqual(["agents", "machines", "roles"]);
+  expect(keys(invalidate).sort()).toEqual(["agents", "machines"]);
   invalidate.mockClear();
   act(() => lastSocket().fail());
   act(() => {
@@ -155,16 +155,6 @@ test("unmount clears a pending trailing refetch", () => {
   unmount();
   vi.advanceTimersByTime(5_000);
   expect(invalidate).not.toHaveBeenCalled();
-});
-
-test("an agents frame refetches roles: vacant roles live only in GET /roles", async () => {
-  const { invalidate } = setup();
-  await act(async () =>
-    lastSocket().push({ type: "machines", machines: [machine] }),
-  );
-  expect(invalidate).not.toHaveBeenCalledWith({ queryKey: qk.roles });
-  await act(async () => lastSocket().push({ type: "agents", agents: [] }));
-  expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.roles });
 });
 
 test("hello followed by both greeting snapshots refetches nothing", async () => {
