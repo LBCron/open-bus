@@ -134,6 +134,7 @@ describe("the codex MCP adapter", () => {
       "self",
       "set_status",
       "card",
+      "rename",
     ]);
     expect(d.hellos).toEqual([]);
   });

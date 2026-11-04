@@ -139,6 +139,23 @@ describe("self (AC5c)", () => {
     expect(out).toBe(JSON.stringify(agent({}), null, 2));
   });
 
+  it("shows a former name, and never inside the JSON", async () => {
+    const d = daemon(() => ({
+      type: "agent",
+      agent: agent({
+        former_names: [
+          { name: "lane-6", expires_at: "2026-10-29T13:00:00.000Z" },
+          { name: "older", expires_at: "2026-10-29T12:30:00.000Z" },
+        ],
+      }),
+    }));
+    const out = (await callTool("self", {}, d.client)).content[0]?.text;
+    expect(out).toBe(
+      `${JSON.stringify(agent({}), null, 2)}\n\nFormer names: lane-6 (until 2026-10-29 13:00 UTC)\n   older (until 2026-10-29 12:30 UTC)`,
+    );
+    expect(out).not.toContain("former_names");
+  });
+
   it("cleans a hostile status label", async () => {
     const d = daemon(() => ({
       type: "agent",
@@ -154,8 +171,8 @@ describe("self (AC5c)", () => {
   });
 });
 
-describe("send_message receipts (AC5c)", () => {
-  it("names the target, ignoring a to_name an old hub sends", async () => {
+describe("send_message receipts (AC5c, #393)", () => {
+  it("a receipt with to_name names both: the current name, then the one asked for", async () => {
     const d = daemon(() => ({
       type: "receipt",
       msg_id: "m",
@@ -167,6 +184,57 @@ describe("send_message receipts (AC5c)", () => {
       { to: "lane-6", text: "hi" },
       d.client,
     );
-    expect(out.content[0]?.text).toBe("✓  Delivered to lane-6.");
+    expect(out.content[0]?.text).toBe(
+      "✓  Delivered to code-96 (formerly lane-6).",
+    );
+  });
+
+  it("a queued receipt reads the same way", async () => {
+    const d = daemon(() => ({
+      type: "receipt",
+      msg_id: "m",
+      state: "pending",
+      to_name: "code-96",
+    }));
+    const out = await callTool(
+      "send_message",
+      { to: "lane-6", text: "hi" },
+      d.client,
+    );
+    expect(out.content[0]?.text).toBe(
+      "○  Queued for code-96 (formerly lane-6). Not delivered yet; expires in 1 hour.",
+    );
+  });
+
+  it("without to_name, or with the same name, nothing new shows", async () => {
+    const plain = daemon(() => ({
+      type: "receipt",
+      msg_id: "m",
+      state: "delivered",
+    }));
+    expect(
+      (
+        await callTool(
+          "send_message",
+          { to: "lane-6", text: "hi" },
+          plain.client,
+        )
+      ).content[0]?.text,
+    ).toBe("✓  Delivered to lane-6.");
+    const same = daemon(() => ({
+      type: "receipt",
+      msg_id: "m",
+      state: "delivered",
+      to_name: "lane-6",
+    }));
+    expect(
+      (
+        await callTool(
+          "send_message",
+          { to: "lane-6", text: "hi" },
+          same.client,
+        )
+      ).content[0]?.text,
+    ).toBe("✓  Delivered to lane-6.");
   });
 });

@@ -11,11 +11,15 @@ import {
   displayKind,
   earlierStatusText,
   excerptOf,
+  formerNamesText,
   messageHeader,
   neutralizeBody,
   oversizedText,
   REFUSAL,
+  RENAME_COPY,
   receiptText,
+  renamedText,
+  renameText,
   rosterLine,
   selfText,
   statusLabelTooLong,
@@ -23,7 +27,9 @@ import {
   statusSetText,
   stripTerminalControls,
   unconfirmedText,
+  untilText,
 } from "@ob/ipc";
+import { candidateName, RENAME_MIN_CLIENT } from "@ob/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import openbus, { copy } from "../assets/openbus.ts";
 import { PI_EXTENSION } from "../src/index.ts";
@@ -110,6 +116,11 @@ const ctx = (sessionId = "pi-sess-1", name: string | undefined = "My Pi") => ({
   sessionManager: {
     getSessionId: () => sessionId,
     getSessionName: () => name,
+  } as {
+    getSessionId(): string;
+    getSessionName(): string | undefined;
+    /** Pi 1.4 and omp: a tool rename renames the session too (#393). */
+    setSessionName?(name: string): void;
   },
 });
 
@@ -188,7 +199,7 @@ describe("pi extension asset", () => {
     expect(src.split("\n")[0]).toMatch(/managed file/i);
   });
 
-  it("registers the six tools with the same JSON-Schema parameters as the MCP tools", () => {
+  it("registers the seven tools with the same JSON-Schema parameters as the MCP tools", () => {
     const p = fakePi();
     openbus(p.pi as never);
     expect([...p.tools.keys()]).toEqual(TOOLS.map((t) => t.name));
@@ -197,6 +208,7 @@ describe("pi extension asset", () => {
         "card",
         "fetch",
         "list_agents",
+        "rename",
         "self",
         "send_message",
         "set_status",
@@ -569,6 +581,81 @@ describe("the asset's own copy matches the shared copy", () => {
       ])
         expect(copy.receiptText(r, to, n, ex)).toBe(receiptText(r, to, n, ex));
   });
+  it.each(["openbus-e0", long])(
+    "receipts that resolved through a former name, for %s",
+    (to) => {
+      for (const state of ["pending", "delivered", "refused"] as const)
+        for (const to_name of [undefined, to, "code-96", "x".repeat(64)])
+          expect(
+            copy.receiptText({ state, to_name }, to, undefined, "hi"),
+          ).toBe(receiptText({ state, to_name }, to, undefined, "hi"));
+    },
+  );
+
+  it("the rename copy, its results and the push", () => {
+    expect(copy.RENAME_COPY).toEqual(RENAME_COPY);
+    expect(copy.renamedText("lane-6")).toBe(renamedText("lane-6"));
+    expect(copy.untilText("2026-10-29T13:00:00.000Z")).toBe(
+      untilText("2026-10-29T13:00:00.000Z"),
+    );
+    const former = [
+      { name: "code-96", expires_at: "2026-10-29T13:00:00.000Z" },
+      { name: "older", expires_at: "2026-10-29T12:30:00.000Z" },
+    ];
+    expect(copy.formerNamesText(former)).toBe(formerNamesText(former));
+    const cases = [
+      { asked: "b", name: "b", before: "b" },
+      { asked: "a", name: "a", before: "b" },
+      { asked: "a", name: "a" },
+      { asked: "a", name: "a", former_names: former },
+      { asked: "code-96", name: "code-96-2" },
+      { asked: "My Name!", name: "my-name" },
+      { asked: "openbus", name: "agent" },
+      { asked: "a", name: "a", former_names: [{ name: "a" }] },
+      { asked: "a", name: "a", former_names: [] },
+      { asked: "a", name: "a", former_names: [{ name: "b" }] },
+      { asked: "1.2.3.4", name: "agent" },
+      { asked: "  x  y ", name: "x y" },
+    ];
+    for (const c of cases) expect(copy.renameText(c)).toBe(renameText(c));
+    for (const raw of [
+      "code-96",
+      "  My  Agent ",
+      "openbus",
+      "Open-Bus-2",
+      "1.2.3.4",
+      "a@b",
+      "",
+      "x".repeat(80),
+      "a\u202eb",
+    ])
+      expect(copy.candidateName(raw)).toBe(candidateName(raw));
+  });
+
+  it("former names in a row: list_agents and self", () => {
+    const former = [
+      { name: "code-96", expires_at: "2026-10-29T13:00:00.000Z" },
+      { name: "older", expires_at: "2026-10-29T12:30:00.000Z" },
+    ];
+    for (const row of [
+      { former_names: former },
+      { name: "code-96", former_names: former },
+      { former_names: [] },
+      { former_names: [{ name: "x" }] },
+      { former_names: former.slice(0, 1) },
+    ]) {
+      const a = {
+        name: "lane-6",
+        kind: "pi",
+        namespace: "ns",
+        queued: false,
+        ...row,
+      };
+      expect(copy.rosterLine(a)).toBe(rosterLine(a));
+      expect(copy.selfText(a)).toBe(selfText(a));
+    }
+  });
+
   it("excerpts", () => {
     for (const body of [
       "hi",
@@ -612,6 +699,267 @@ describe("the asset's own copy matches the shared copy", () => {
     expect(copy.stripTerminalControls(body)).toBe(stripTerminalControls(body));
     expect(copy.displayKind(body)).toBe(displayKind(body));
     expect(copy.neutralizeBody(body)).toBe(neutralizeBody(body));
+  });
+});
+
+describe("renames on Pi and oh-my-pi (#393, R393d)", () => {
+  /** A session whose name the harness can change, as Pi's own `/rename` does. */
+  function session(initial: string | undefined, id = "pi-sess-1") {
+    let name = initial;
+    const set: string[] = [];
+    return {
+      ctx: {
+        cwd: "/work/repo",
+        sessionManager: {
+          getSessionId: () => id,
+          getSessionName: () => name,
+          setSessionName: (n: string) => {
+            name = n;
+            set.push(n);
+          },
+        },
+      },
+      set,
+      /** The user's `/rename`: the session's name alone moves. */
+      user: (n: string) => {
+        name = n;
+      },
+    };
+  }
+
+  const agent = (r: Record<string, unknown> = {}) => ({
+    name: "pi-agent",
+    namespace: "ns",
+    kind: "pi",
+    live: true,
+    global: false,
+    ...r,
+  });
+
+  /** A daemon that answers `rename` with `answer`; started with `c`. */
+  async function startedWith(
+    c: ReturnType<typeof session>["ctx"],
+    answer: (f: Frame) => Record<string, unknown> | undefined = (f) =>
+      f.type === "rename"
+        ? { type: "agent", agent: agent({ name: String(f.name) }) }
+        : undefined,
+  ) {
+    const d = await fakeDaemon(home, answer);
+    const p = fakePi();
+    openbus(p.pi as never);
+    await p.emit("session_start", c as never, { reason: "startup" });
+    await vi.waitFor(() => expect(d.conns).toHaveLength(1));
+    return { d, p };
+  }
+
+  const renames = (d: Awaited<ReturnType<typeof startedWith>>["d"]) =>
+    d.conns.flatMap((c) => c.frames).filter((f) => f.type === "rename");
+
+  it("the rename tool: the copy, the write-back, and one name everywhere", async () => {
+    const { ctx: c, set } = session("My Pi");
+    const { d, p } = await startedWith(c, (f) =>
+      f.type === "rename"
+        ? {
+            type: "agent",
+            agent: agent({
+              name: String(f.name),
+              former_names: [
+                { name: "pi-agent", expires_at: "2026-10-29T13:00:00.000Z" },
+              ],
+            }),
+          }
+        : undefined,
+    );
+    expect(await p.call("rename", { name: "new-name" }, c)).toBe(
+      "You are now new-name on the bus.\npi-agent still reaches you until 2026-10-29 13:00 UTC.",
+    );
+    expect(renames(d)).toHaveLength(1);
+    // The session follows the bus, so one name is everywhere.
+    expect(set).toEqual(["new-name"]);
+  });
+
+  it("the write-back's own event names no new edge: no loop", async () => {
+    const { ctx: c, set } = session("My Pi");
+    const { d, p } = await startedWith(c);
+    await p.call("rename", { name: "new-name" }, c);
+    expect(set).toEqual(["new-name"]);
+    // Pi fires `session_info_changed` after the write-back, with that name.
+    await p.emit("session_info_changed", c, { name: "new-name" });
+    await p.emit("session_info_changed", c, { name: "new-name" });
+    expect(renames(d)).toHaveLength(1);
+  });
+
+  it("with no expiry from the daemon, names the grace as a duration", async () => {
+    const { ctx: c } = session("My Pi");
+    const { p } = await startedWith(c);
+    // The fake daemon's welcome said `pi-agent`, and the answer is the agent
+    // alone: the former name is the welcome's.
+    expect(await p.call("rename", { name: "new-name" }, c)).toBe(
+      "You are now new-name on the bus. pi-agent still reaches you for 1 hour.",
+    );
+  });
+
+  it("a name the hub had to change says it was taken", async () => {
+    const { ctx: c } = session("My Pi");
+    const { p } = await startedWith(c, (f) =>
+      f.type === "rename"
+        ? { type: "agent", agent: agent({ name: "taken-2" }) }
+        : undefined,
+    );
+    expect(await p.call("rename", { name: "taken" }, c)).toBe(
+      "taken is taken, so you are now taken-2.",
+    );
+  });
+
+  it("a no-op says you are already there", async () => {
+    const { ctx: c } = session("My Pi");
+    const { p } = await startedWith(c, (f) =>
+      f.type === "rename"
+        ? { type: "agent", agent: agent({ name: "pi-agent" }) }
+        : undefined,
+    );
+    // The name the daemon said at hello.
+    expect(await p.call("rename", { name: "pi-agent" }, c)).toBe(
+      "You are already pi-agent.",
+    );
+  });
+
+  it("a daemon below the gate answers bad_frame: the update copy", async () => {
+    const { ctx: c } = session("My Pi");
+    const { p } = await startedWith(c, (f) =>
+      f.type === "rename"
+        ? { type: "error", code: "bad_frame", message: "Invalid input" }
+        : undefined,
+    );
+    await expect(p.call("rename", { name: "x" }, c)).rejects.toThrow(
+      new Error(CARD_COPY.unsupported),
+    );
+  });
+
+  it("a hub rate limit refuses with Design's line", async () => {
+    const { ctx: c } = session("My Pi");
+    const { p } = await startedWith(c, (f) =>
+      f.type === "rename"
+        ? { type: "error", code: "rate_limited", message: "Too many renames" }
+        : undefined,
+    );
+    await expect(p.call("rename", { name: "x" }, c)).rejects.toThrow(
+      new Error(RENAME_COPY.rate_limited),
+    );
+  });
+
+  it("refuses a name outside 1 to 64 before the daemon", async () => {
+    const { ctx: c } = session("My Pi");
+    const { d, p } = await startedWith(c);
+    for (const name of ["", "x".repeat(65)])
+      await expect(p.call("rename", { name }, c)).rejects.toThrow(
+        /^openbus: name: /,
+      );
+    expect(renames(d)).toEqual([]);
+  });
+
+  it("Pi's own rename: `session_info_changed` sends exactly one rename", async () => {
+    const { ctx: c, user } = session("My Pi");
+    const { d, p } = await startedWith(c);
+    user("Docs Lead");
+    await p.emit("session_info_changed", c, { name: "Docs Lead" });
+    await vi.waitFor(() => expect(renames(d)).toHaveLength(1));
+    expect(renames(d)[0]).toMatchObject({ name: "docs-lead" });
+    // The same event again, and a re-read of the same name: nothing.
+    await p.emit("session_info_changed", c, { name: "Docs Lead" });
+    expect(renames(d)).toHaveLength(1);
+  });
+
+  it("omp has no event: its name change is seen on turn_end", async () => {
+    const { ctx: c, user } = session("omp session", "omp-root");
+    const omp = Object.assign(c, { agent: { kind: "main" } });
+    const { d, p } = await startedWith(omp, (f) =>
+      f.type === "rename"
+        ? { type: "agent", agent: agent({ name: String(f.name), kind: "omp" }) }
+        : undefined,
+    );
+    expect(renames(d)).toEqual([]);
+    user("Docs Lead");
+    await p.emit("turn_end", omp, {});
+    await vi.waitFor(() => expect(renames(d)).toHaveLength(1));
+    expect(renames(d)[0]).toMatchObject({ name: "docs-lead" });
+    // And once more per tool call, without sending it twice.
+    await p.call("self", {}, omp);
+    expect(renames(d)).toHaveLength(1);
+  });
+
+  it("a tool call sees an omp rename too, before the call's own frame", async () => {
+    const { ctx: c, user } = session("omp session", "omp-root");
+    const omp = Object.assign(c, { agent: { kind: "main" } });
+    const { d, p } = await startedWith(omp);
+    user("Docs Lead");
+    await p.call("self", {}, omp);
+    await vi.waitFor(() => expect(renames(d)).toHaveLength(1));
+    expect(d.conns[0].frames.map((f) => f.type)).toEqual([
+      "hello",
+      "rename",
+      "self",
+    ]);
+  });
+
+  it("a harness rename below the gate is dropped, never a failed tool call", async () => {
+    const { ctx: c, user } = session("My Pi");
+    const { d, p } = await startedWith(c, (f) =>
+      f.type === "rename"
+        ? { type: "error", code: "bad_frame", message: "Invalid input" }
+        : f.type === "self"
+          ? { type: "agent", agent: agent() }
+          : undefined,
+    );
+    user("Docs Lead");
+    await p.emit("session_info_changed", c, { name: "Docs Lead" });
+    await vi.waitFor(() => expect(renames(d)).toHaveLength(1));
+    // Still usable, and the next call belongs to the session as before.
+    expect(JSON.parse(await p.call("self", {}, c)).name).toBe("pi-agent");
+  });
+
+  it("a `renamed` push tells the model, unless it is this call's own echo", async () => {
+    const { ctx: c } = session("My Pi");
+    const { d, p } = await startedWith(c);
+    // A harness or hub-side change.
+    d.push({ type: "renamed", name: "lane-6" });
+    await vi.waitFor(() => expect(p.sent).toHaveLength(1));
+    expect(p.sent[0].message).toMatchObject({
+      content: "[openbus] Your bus name is now lane-6.",
+    });
+    // The same name again is its echo: nothing new to say.
+    d.push({ type: "renamed", name: "lane-6" });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(p.sent).toHaveLength(1);
+  });
+
+  it("list_agents and self show former names", async () => {
+    const { ctx: c } = session("My Pi");
+    const former = [
+      { name: "code-96", expires_at: "2026-10-29T13:00:00.000Z" },
+    ];
+    const { p } = await startedWith(c, (f) =>
+      f.type === "list"
+        ? { type: "roster", agents: [agent({ former_names: former })] }
+        : f.type === "self"
+          ? { type: "agent", agent: agent({ former_names: former }) }
+          : undefined,
+    );
+    expect(await p.call("list_agents", {}, c)).toBe(
+      "- pi-agent (was code-96) (pi, ns)",
+    );
+    expect(await p.call("self", {}, c)).toBe(
+      `${JSON.stringify(agent({}), null, 2)}\n\nFormer names: code-96 (until 2026-10-29 13:00 UTC)`,
+    );
+  });
+
+  it("the gate the tool is offered on is the daemon's, not the adapter's", () => {
+    // Registered at load, before any daemon is known: the copy says "too old"
+    // rather than the tool being missing (see the gate test above).
+    expect(RENAME_MIN_CLIENT).toMatch(/^\d+\.\d+\.\d+$/);
+    const p = fakePi();
+    openbus(p.pi as never);
+    expect(p.tools.has("rename")).toBe(true);
   });
 });
 
@@ -702,7 +1050,7 @@ describe("one file for Pi and oh-my-pi (C23b)", () => {
     openbus(p.pi as never);
     for (const t of p.tools.values()) expect(t).not.toHaveProperty("loadMode");
     const o = ompHost();
-    expect(o.tools.size).toBe(6);
+    expect(o.tools.size).toBe(7);
     expect(o.tools.get("set_status")).toMatchObject({ loadMode: "essential" });
     expect(o.tools.get("card")).toMatchObject({ loadMode: "essential" });
     for (const t of o.tools.values())
@@ -1053,7 +1401,7 @@ describe("status, as Pi shows it (AC5c)", () => {
     expect(await p.call("self", {})).toBe(JSON.stringify(row({}), null, 2));
   });
 
-  it("send_message: names the target, ignoring an old hub's to_name", async () => {
+  it("send_message: a receipt with to_name names both names (#393)", async () => {
     const { p } = await started((f) =>
       f.type === "send"
         ? {
@@ -1065,7 +1413,7 @@ describe("status, as Pi shows it (AC5c)", () => {
         : undefined,
     );
     expect(await p.call("send_message", { to: "lane-6", text: "hi" })).toBe(
-      "✓  Delivered to lane-6.",
+      "✓  Delivered to code-96 (formerly lane-6).",
     );
   });
 
