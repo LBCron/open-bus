@@ -270,6 +270,12 @@ export function copy(style: Style) {
               ),
               next("Run npx @open-bus/cli install."),
             ],
+    // After the daemon line, when Codex is configured: open threads keep
+    // their old adapter, or have none (C27k).
+    codexRestart: () =>
+      next(
+        "Restart the Codex app and open Codex sessions to load the new OpenBus.",
+      ),
     // install --no-service: the service step is skipped, nothing is started.
     serviceSkipped: () => [
       warn("Skipped the service, so no daemon is running."),

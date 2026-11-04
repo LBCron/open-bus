@@ -157,7 +157,10 @@ export async function loginStep(
   }
 }
 
-async function harnessesStep(ctx: Ctx): Promise<boolean> {
+/** What the harness step tells the daemon step. */
+type Seen = { codex: boolean };
+
+async function harnessesStep(ctx: Ctx, seen: Seen): Promise<boolean> {
   const c = ctx.copy;
   const out = await installAdapters({
     home: ctx.userHome,
@@ -170,6 +173,7 @@ async function harnessesStep(ctx: Ctx): Promise<boolean> {
     exec: ctx.exec,
     codexApp: ctx.codexApp,
   });
+  seen.codex = out.installed.includes("codex");
   if (out.installed.length > 0) say(ctx, c.configured(out.installed));
   else if (out.skipped.length === 0) say(ctx, c.noHarness());
   if (out.sharedPiFile) say(ctx, c.sharedPiFile());
@@ -215,7 +219,11 @@ export async function waitForDaemon(
   }
 }
 
-async function daemonStep(ctx: Ctx, noService = false): Promise<boolean> {
+async function daemonStep(
+  ctx: Ctx,
+  noService = false,
+  seen: Seen = { codex: false },
+): Promise<boolean> {
   const c = ctx.copy;
   if (noService) {
     // No service call at all: report the daemon if the user already runs one.
@@ -228,6 +236,8 @@ async function daemonStep(ctx: Ctx, noService = false): Promise<boolean> {
     }
     // Started by the user: the "without a service" variant, not "run install".
     say(ctx, c.daemonRunning(st.pid, undefined, true), "");
+    // An open Codex thread keeps its old adapter, or none (C27k).
+    if (seen.codex) say(ctx, c.codexRestart());
     say(ctx, roster(ctx, st), "", c.statusHint());
     return true;
   }
@@ -242,8 +252,10 @@ async function daemonStep(ctx: Ctx, noService = false): Promise<boolean> {
     sayErr(ctx, unsafe ?? c.daemonTimeout());
     return false;
   }
-  say(ctx, c.daemonRunning(st.pid, ctx.service.kind, ctx.service.fallback), "");
-  say(ctx, roster(ctx, st), "", c.statusHint());
+  say(ctx, c.daemonRunning(st.pid, ctx.service.kind, ctx.service.fallback));
+  // An open Codex thread keeps its old adapter, or none (C27k).
+  if (seen.codex) say(ctx, c.codexRestart());
+  say(ctx, "", roster(ctx, st), "", c.statusHint());
   return true;
 }
 
@@ -303,7 +315,10 @@ export function roster(ctx: Ctx, st: StatusReply): string[] {
   return ns ? rosters(ctx, [ns]) : [ctx.copy.noNamespace()];
 }
 
-export const installSteps = (opts: InstallOpts): Step<Ctx>[] => [
+export const installSteps = (
+  opts: InstallOpts,
+  seen: Seen = { codex: false },
+): Step<Ctx>[] => [
   {
     name: "login",
     label: "Machine approved",
@@ -333,7 +348,7 @@ export const installSteps = (opts: InstallOpts): Step<Ctx>[] => [
       ).includes("missing")
         ? "todo"
         : "done",
-    apply: harnessesStep,
+    apply: (ctx) => harnessesStep(ctx, seen),
   },
   {
     name: "daemon",
@@ -348,7 +363,7 @@ export const installSteps = (opts: InstallOpts): Step<Ctx>[] => [
         return "todo";
       }
     },
-    apply: (ctx) => daemonStep(ctx, opts.noService),
+    apply: (ctx) => daemonStep(ctx, opts.noService, seen),
   },
 ];
 

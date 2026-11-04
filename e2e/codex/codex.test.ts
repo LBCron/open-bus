@@ -504,6 +504,61 @@ describe("codex app-server (the desktop app's mode)", () => {
   });
 });
 
+// The desktop app keeps a thread's adapter across an upgrade (#343): one from
+// before C27a sends no item id. old-adapter.mjs drops it and says 0.61.0.
+describe("codex app-server in code mode, with an adapter from before C27a (C27k)", () => {
+  it("is told to restart the Codex app, and nothing is delivered", async () => {
+    const ws = codexWorkspace("cx-stale");
+    const p = await joinPeer("stale", "peer", ws);
+    const old = new URL("./old-adapter.mjs", import.meta.url).href;
+    const app = await appServer(codexBin, ws, env, [
+      "-c",
+      "features.code_mode_only=true",
+      "-c",
+      `mcp_servers.openbus.args=${JSON.stringify(["--import", old, cliBundle, "mcp", "codex"])}`,
+    ]);
+    try {
+      const ready = pastFirstSecond(app.child.pid as number);
+      ready.catch(() => {});
+      model.hold = () => ready;
+      const thread = (
+        await app.request<{ thread: { id: string } }>("thread/start", {
+          cwd: ws,
+          threadSource: "user",
+        })
+      ).thread.id;
+      const from = app.notes.length;
+      await app.request("turn/start", {
+        threadId: thread,
+        input: [
+          {
+            type: "text",
+            text: codePrompt([
+              [["send_message", { to: "peer", text: "from an old adapter" }]],
+            ]),
+            text_elements: [],
+          },
+        ],
+      });
+      await app.next(
+        (n) => n.method === "turn/completed" && n.params?.threadId === thread,
+        from,
+      );
+      const outs = onThread(thread)
+        .filter((s) => s.answers === "exec")
+        .map((s) => s.output ?? "");
+      expect(outs).toHaveLength(1);
+      expect(outs[0]).toContain(
+        "OpenBus did not accept this thread: its OpenBus server is older than the daemon. Ask the user to restart the Codex app.",
+      );
+      expect(outs[0]).toContain(CODEX_REFUSALS.staleAdapter);
+      expect(p.delivered).toEqual([]);
+    } finally {
+      await stop(app.child);
+    }
+  });
+});
+
 // Claude Code, the same way: `claude -p` against a fake Messages API with a
 // dummy key (no login, no network), `open-bus mcp claude` from the bundle.
 describe("claude -p", () => {
