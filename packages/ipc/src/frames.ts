@@ -194,6 +194,21 @@ export const CardRequest = z.object({
 });
 
 /**
+ * The `rename` tool (#393): a name the agent chose. Answered by `agent` (the
+ * updated self) or by `error` (the hub's refusal reaches the caller). The
+ * daemon asks the hub for it at or above the rename gate, and re-sends
+ * `agent_up` below it. Offered only by a daemon whose `daemon_version` is at
+ * or above RENAME_MIN_CLIENT; an older daemon refuses it as bad_frame.
+ */
+export const Rename = z.object({
+  ...base,
+  ...optIn,
+  type: z.literal("rename"),
+  /** The name asked for; the hub slugs it, as it does a hello's `proposed_name`. */
+  name: z.string().min(1).max(64).refine(isWellFormed, WELL_FORMED),
+});
+
+/**
  * A local CLI asking the daemon how it is (`open-bus status`, `install`). No
  * hello: the socket is the user's own (0600). `cwd` picks the namespace.
  */
@@ -214,6 +229,7 @@ export const AdapterFrame = z.discriminatedUnion("type", [
   Ack,
   SetStatus,
   CardRequest,
+  Rename,
 ]);
 export type AdapterFrame = z.infer<typeof AdapterFrame>;
 
@@ -260,6 +276,12 @@ export const Receipt = z.object({
   held: z.literal(true).optional(),
   /** The daemon's own copy for this result: shown as-is, never as an error. */
   text: z.string().min(1).optional(),
+  /**
+   * The target's current name, when the send resolved through a former one
+   * (#393): adapters render "formerly". Only to adapters at or above
+   * RENAME_MIN_CLIENT (legacy.ts).
+   */
+  to_name: BusNameSchema.optional(),
   ...late,
 });
 export const Roster = z.object({
@@ -311,6 +333,18 @@ export const Deliver = z
   .refine((d) => (d.body === undefined) !== (d.notice === undefined), {
     message: "deliver needs exactly one of body or notice",
   });
+/**
+ * The agent's bus name changed (#393), pushed to a persistent link (Pi/omp)
+ * whose adapter is at or above RENAME_MIN_CLIENT; `former` is the name it
+ * left, absent on a no-op. A harness or hub-side change both land here.
+ */
+export const Renamed = z.object({
+  ...base,
+  type: z.literal("renamed"),
+  name: z.string().min(1).max(256),
+  former: z.string().min(1).max(256).optional(),
+});
+
 /** A short local notice from OpenBus (the sender's mail expired or was refused); never a message. */
 export const Notice = z.object({
   ...base,
@@ -359,6 +393,12 @@ export const StatusReply = z.object({
           status: StatusStateSchema.optional(),
           status_label: StatusLabelSchema.optional(),
           status_at: IsoTimeSchema.optional(),
+          /**
+           * Names the agent left that still reach it (#393): `open-bus status`
+           * shows the newest as "(was x)". Only to clients at or above
+           * RENAME_MIN_CLIENT (legacy.ts).
+           */
+          former_names: FormerNamesSchema.optional(),
         }),
       ),
     }),
@@ -391,5 +431,6 @@ export const DaemonFrame = z.discriminatedUnion("type", [
   StatusReply,
   StatusSet,
   Card,
+  Renamed,
 ]);
 export type DaemonFrame = z.infer<typeof DaemonFrame>;
