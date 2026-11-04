@@ -49,6 +49,7 @@ One JSON object per WebSocket text message. Every frame is a strict object `{v: 
 - `fetch {from_ref, msg_id}`
 - `status {from_ref, state, label?}`: self-reported status (see Agent card). Fire and forget: no reply on success.
 - `card_request {from_ref, aud, nonce}`: answered by `card` or `card_refused` (see Agent card).
+- `rename {agent_ref, proposed_name}`: rename a live agent; `proposed_name` 1..256 chars (the hub names it via `candidateName`). Answered by `renamed` or `error` (see Renames).
 
 ### Hub to client (`SERVER_FRAMES`)
 
@@ -65,6 +66,7 @@ One JSON object per WebSocket text message. Every frame is a strict object `{v: 
 - `roster_changed {namespace}`
 - `card {jwt}`: a compact JWS card, reply to `card_request`.
 - `card_refused {code}`: `code` is `not_linked | bad_nonce | rate_limited` (`CARD_REFUSAL_CODES`).
+- `renamed {agent_ref, bus_name, former?}`: reply to `rename`. `former` is the name left, absent on a no-op, never equal to `bus_name`.
 
 ### `send` targeting
 
@@ -102,7 +104,7 @@ The hub dedupes `send` on (sender agent, frame `id`). The sender agent is the hu
 Bounds, checked in order before and during parsing:
 1. Non-string input is `bad_frame`.
 2. Raw length > `MAX_RAW_FRAME_CHARS` is `too_large`, before any parse.
-3. Linear pre-scan outside strings: depth <= 4, `:` plus `,` <= 16384 in total and <= 64 directly in one object, structural characters <= 65536. Otherwise `bad_frame`, before `JSON.parse`.
+3. Linear pre-scan outside strings, `:` plus `,` <= 64 directly in one object, and per direction: client frames (hub side) depth <= 4, `:` plus `,` <= 16384 in total, structural characters <= 65536; server frames (daemon side) depth <= 5, 65536 and 131072, so a full roster of rows with card fields and 5 `former_names` fits. Otherwise `bad_frame` (without the `id`), before `JSON.parse`.
 4. After parse, a `body` over 1 MB of UTF-8 is `too_large`; schema failure is `bad_frame`.
    Control-heavy bodies can escape to 6x, so a body under 1 MB can still be `too_large` on the wire.
 5. Free-text fields (`body`, `client_version`, `server_version`, `proposed_name`, error `message`) must be well-formed Unicode: a lone surrogate (JSON `"\ud800"`) is `bad_frame`, in both decoders. Valid pairs (emoji) are fine. `to_name`, `from_name`, `bus_name`, namespaces and refs are ASCII-only and `machine_label` rejects `\p{Cs}`, so they cannot carry one. `encodeFrame` throws `RangeError` on such text instead of emitting a frame every peer would refuse; the hub's `sendFrame` catches it.
@@ -120,6 +122,15 @@ Spec `docs/superpowers/specs/2026-10-29-agent-card-design.md`; schemas in `card.
 - Roles: owner-assigned `BusNameSchema` names in a namespace's agent-name space, set only through owner REST (no frame or tool). The hub resolves a send to a role to its holder for every client version; a vacant role (no holder, or it closed) is refused `role_vacant`. Roster rows gain `role?`.
 - Status: `status {state, label?}`; `state` is `working | idle | blocked | waiting_on_owner` (`STATUS_STATES`), `label` is `StatusLabelSchema` (`MachineLabelSchema` rules, <= 64 code points). The first update in a `STATUS_WINDOW_MS` (5 s) window applies at once; the last coalesced one applies when it closes. Cleared on close. Roster rows gain `status?`, `status_label?`, `status_at?` (ISO); REST `Agent` gains `role?`, `status?`, `statusLabel?`, `statusAt?`.
 - Card: `card_request.nonce` and the link `state` match `NonceSchema` (`^[A-Za-z0-9_-]{16,128}$`); `aud` is `OriginSchema` (an exact lowercase https origin, default port omitted; http only on loopback). At most `CARDS_PER_MINUTE` (6) per agent. The card is a compact JWS, `alg: EdDSA`, `kid` required, `typ: ob-card+jwt` (`CARD_TYP`); a link assertion is `typ: ob-link+jwt` (`LINK_TYP`). Both live `CARD_TTL_SEC` (300 s): `exp = iat + 300`. `CardClaimsSchema` (strict): `iss, aud, sub, owner, nonce, iat, exp, jti, name, role?, kind, machine, agent_says? {status, label?}`; never email, namespace or machine id. `LinkClaimsSchema` (strict): `iss, aud, owner, state, iat, exp, jti`. `owner` is 43 base64url chars, `jti` 22.
+
+### Renames (#393)
+
+Plan: Task R393 in `docs/superpowers/plans/2026-10-21-openbus/05-client.md`; schemas in `rename.ts`.
+- Gate: `RENAME_MIN_CLIENT` (`0.64.0`). Only a daemon at or above it receives roster `former_names` and a former-name receipt `to_name`, and only a hub at or above it gets `rename`. Below it the hub resolves former names the same, without those fields, and the daemon renames by re-sending `agent_up` (no grace, no rate limit). At or above it, a re-sent `agent_up` is a reopen, never a rename.
+- Roster rows gain `former_names?: [{name, expires_at}]` (`FormerNamesSchema`): 1..`LIMITS.maxFormerNames` (5), newest first, distinct, never the row's `bus_name`; absent when none. The hub may hold more live former names than it shows; those still resolve and stay reserved.
+- A former name reaches its agent for `LIMITS.formerNameGraceMs` (1 h, the mail TTL). Name changes per agent are capped at `LIMITS.renamesPerHour` (10) per rolling hour; past it `rename` gets `error rate_limited` with message `RENAME_MESSAGES.rate` = `"Too many renames"`. A no-op doesn't count. A `rename` for an agent that isn't live is `error not_registered`.
+- Receipts reuse `to_name`: a send resolved through a former name carries the current name.
+- Hub rules (reservation, default-name suffixes, resolution order) are enforced by the hub (R393b).
 
 ## REST and the dashboard feed
 

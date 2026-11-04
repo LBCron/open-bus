@@ -165,6 +165,7 @@ describe("frames", () => {
       "fetch",
       "status",
       "card_request",
+      "rename",
     ]);
     expect(SERVER_FRAMES).toEqual([
       "hello_ok",
@@ -178,6 +179,7 @@ describe("frames", () => {
       "roster_changed",
       "card",
       "card_refused",
+      "renamed",
     ]);
   });
   it("formats a rejection with the frame id when there is one", () => {

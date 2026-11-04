@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AdapterFrame,
   AGENT_REF,
+  AgentInfo,
   DaemonFrame,
   Hello,
   MAX_LINE_BYTES,
@@ -299,5 +300,37 @@ describe("codex hello facts (C26b)", () => {
       { ...codex, turn_id: "x".repeat(257) },
     ])
       expect(Hello.safeParse({ ...base, codex: bad }).success).toBe(false);
+  });
+});
+
+describe("AgentInfo former_names (#393, R393a)", () => {
+  const info = {
+    name: "beta",
+    namespace: "ns",
+    kind: "pi",
+    live: true,
+    global: false,
+  };
+  const at = (h: number) => new Date(Date.UTC(2026, 10, 4, h)).toISOString();
+  const names = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      name: `old-${i}`,
+      expires_at: at(9 - i),
+    }));
+
+  it("is optional and carries up to 5, newest first", () => {
+    expect(AgentInfo.parse(info)).toEqual(info);
+    const five = { ...info, former_names: names(5) };
+    expect(AgentInfo.parse(five)).toEqual(five);
+  });
+
+  it("rejects over 5, or oldest first", () => {
+    expect(
+      AgentInfo.safeParse({ ...info, former_names: names(6) }).success,
+    ).toBe(false);
+    expect(
+      AgentInfo.safeParse({ ...info, former_names: names(2).reverse() })
+        .success,
+    ).toBe(false);
   });
 });

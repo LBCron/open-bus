@@ -3,6 +3,7 @@ import {
   AgentKindSchema,
   AgentRefSchema,
   BusNameSchema,
+  FormerNamesSchema,
   IsoTimeSchema,
   KindTokenSchema,
   MachineLabelSchema,
@@ -235,6 +236,8 @@ export const AgentInfo = z.object({
   status: StatusStateSchema.optional(),
   status_label: StatusLabelSchema.optional(),
   status_at: IsoTimeSchema.optional(),
+  /** Names the agent left that still reach it, newest first (#393). Only to clients at or above RENAME_MIN_CLIENT. */
+  former_names: FormerNamesSchema.optional(),
 });
 
 export const Welcome = z.object({
@@ -258,7 +261,7 @@ export const Receipt = z.object({
   held: z.literal(true).optional(),
   /** The daemon's own copy for this result: shown as-is, never as an error. */
   text: z.string().min(1).optional(),
-  /** The resolved recipient (a send to a role names its holder). Gated like AgentInfo's card fields. */
+  /** The resolved recipient when it differs from the name sent to: a role's holder, or a renamed agent's current name (#393). Gated like AgentInfo's fields. */
   to_name: BusNameSchema.optional(),
   ...late,
 });

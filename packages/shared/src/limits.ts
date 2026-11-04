@@ -40,6 +40,12 @@ export const LIMITS = {
   maxMachinesListed: 100,
   /** Roles per hub (GET /api/v1/roles); a PUT past it is refused 409 conflict. */
   maxRoles: 1000,
+  /** A former name reaches its agent, and is reserved from others, this long after a rename (#393). Equals the mail TTL. */
+  formerNameGraceMs: 3_600_000,
+  /** Former names shown per roster row, newest first. The hub may hold more live ones (up to renamesPerHour). */
+  maxFormerNames: 5,
+  /** Name changes per agent per rolling hour; past it `rename` gets `error rate_limited`. A no-op doesn't count. */
+  renamesPerHour: 10,
 } as const;
 
 const enc = new TextEncoder();
