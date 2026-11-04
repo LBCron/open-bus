@@ -20,6 +20,14 @@ export const DRAIN_CAP_MS = 30 * 60_000;
 export const HOLD_LABEL = "release-hold";
 /** The cadence arms the release PR only with this label (#435): a person decides a release ships. */
 export const OK_LABEL = "release-ok";
+/**
+ * The commit status that ties an approval to one head (#445). release-label.yml
+ * sets it on the head `release-ok` was added on; a later push makes a new head
+ * without it, so the cadence waits for a fresh approval.
+ */
+export const APPROVAL_CONTEXT = "release-ok";
+/** A release PR waiting for approval gets a gentle `blocker` reminder after this long. */
+export const APPROVAL_REMINDER_MS = 3 * DAY_MS;
 
 export type ExecResult = { code: number; stdout: string; stderr: string };
 export type Exec = (
@@ -87,6 +95,8 @@ export type ReleasePr = {
   armedBy?: string;
   /** Carries the release-ok label (#435). */
   ok: boolean;
+  /** The head commit carries a success `release-ok` status (#445): the label was added on this head. */
+  approved: boolean;
   /** Carries the release-hold label. */
   held: boolean;
   rollup: string;
@@ -152,6 +162,12 @@ async function snapshot(exec: Exec, repo: string): Promise<Snapshot> {
       ),
       ok: (n.labels?.nodes ?? []).some(
         (l: { name?: string }) => l.name === OK_LABEL,
+      ),
+      approved: contexts.some(
+        (c) =>
+          c.__typename === "StatusContext" &&
+          c.context === APPROVAL_CONTEXT &&
+          c.state === "SUCCESS",
       ),
       rollup: rollup?.state ?? "NONE",
       contexts,
@@ -219,14 +235,17 @@ function plan(
       msg: `release PR #${pr.number} has the ${HOLD_LABEL} label, not arming`,
     };
   }
-  if (!pr.ok) {
-    // Opt-in (#435): without release-ok, take back an arm the App set.
+  if (!pr.ok || !pr.approved) {
+    // Opt-in (#435), tied to the head (#445): without release-ok on this exact
+    // head, take back an arm the App set.
     const ours = Boolean(appLogin) && bare(pr.armedBy) === bare(appLogin);
     if (pr.armed && ours) return { do: "disarm", pr };
     return {
       do: "none",
       result: { action: "not-ok", pr: pr.number },
-      msg: `release PR #${pr.number} has no ${OK_LABEL} label, not arming`,
+      msg: !pr.ok
+        ? `release PR #${pr.number} has no ${OK_LABEL} label, not arming`
+        : `release PR #${pr.number}: ${OK_LABEL} was added on an older head; remove and re-add it to approve ${pr.oid.slice(0, 7)}`,
     };
   }
   if (pr.armed) {
@@ -423,8 +442,12 @@ export async function blocker(o: {
 
   if (pr) {
     const bad = pr.rollup === "FAILURE" || pr.rollup === "ERROR";
-    // Waiting for release-ok (#435) is a person's choice, not a stuck release.
-    const old = pr.ok && o.now() - Date.parse(pr.createdAt) > DAY_MS;
+    // Waiting for release-ok (#435) is a person's choice, not a stuck release:
+    // an approved one is stuck after 24 h, an unapproved one gets a gentle
+    // reminder after APPROVAL_REMINDER_MS (#445).
+    const live = pr.ok && pr.approved;
+    const age = o.now() - Date.parse(pr.createdAt);
+    const old = live ? age > DAY_MS : age > APPROVAL_REMINDER_MS;
     if (!bad && !old)
       return closed.length
         ? { action: "closed", issues: closed }
@@ -432,7 +455,11 @@ export async function blocker(o: {
     const reasons = [
       ...(bad ? [`release PR #${pr.number} has failing checks`] : []),
       ...(old
-        ? [`release PR #${pr.number} has been open for over 24 hours`]
+        ? [
+            live
+              ? `release PR #${pr.number} has been open for over 24 hours`
+              : `release PR #${pr.number} has waited over 3 days for ${OK_LABEL} on its current head`,
+          ]
         : []),
     ];
     const lines = [

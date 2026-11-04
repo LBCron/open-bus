@@ -58,7 +58,11 @@ const isRelease = (pr: Pr, repo: string): boolean =>
 
 const SHA_RE = /^[0-9a-f]{40}$/;
 
-export type ApproveResult = "approved" | "stale" | "not-release" | "not-labeled";
+export type ApproveResult =
+  | "approved"
+  | "stale"
+  | "not-release"
+  | "not-labeled";
 
 export async function approve(o: {
   exec: Exec;
@@ -87,7 +91,11 @@ export async function approve(o: {
   return "approved";
 }
 
-export type DequeueResult = "dequeued" | "not-queued" | "not-held" | "not-release";
+export type DequeueResult =
+  | "dequeued"
+  | "not-queued"
+  | "not-held"
+  | "not-release";
 
 export async function dequeue(o: {
   exec: Exec;

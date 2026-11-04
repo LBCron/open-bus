@@ -69,7 +69,11 @@ describe("approve: release-ok is tied to the labeled head (#445)", () => {
   });
 
   it("refuses a SHA that is no longer the head: the push won the race", async () => {
-    const g = fakeGh({ ref: RELEASE_BRANCH, labels: [OK_LABEL], head: "b".repeat(40) });
+    const g = fakeGh({
+      ref: RELEASE_BRANCH,
+      labels: [OK_LABEL],
+      head: "b".repeat(40),
+    });
     expect(await approve({ exec: g.exec, repo: REPO, pr: 301, sha: SHA })).toBe(
       "stale",
     );
@@ -147,7 +151,10 @@ describe("release-label.yml", () => {
     const a = w.jobs.approve;
     expect(String(a.if)).toContain("'labeled'");
     expect(String(a.if)).toContain("'release-ok'");
-    expect(a.permissions).toEqual({ statuses: "write", "pull-requests": "read" });
+    expect(a.permissions).toEqual({
+      statuses: "write",
+      "pull-requests": "read",
+    });
     expect(JSON.stringify(a)).toContain("release-label.ts approve");
     expect(JSON.stringify(a)).toContain("pull_request.head.sha");
     const d = w.jobs.dequeue;

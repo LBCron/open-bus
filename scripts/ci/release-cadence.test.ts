@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  APPROVAL_CONTEXT,
   arm,
   blocker,
   DRAIN_CAP_MS,
@@ -11,6 +12,12 @@ import {
 } from "./release-cadence.ts";
 
 const REPO = "open-artifacts-ai/open-bus";
+/** The head's release-ok approval status (#445); fixtures default to an approved head. */
+const APPROVED = {
+  __typename: "StatusContext",
+  context: APPROVAL_CONTEXT,
+  state: "SUCCESS",
+};
 const NOW = Date.parse("2026-10-21T15:00:00Z");
 const hoursAgo = (h: number) => new Date(NOW - h * 3600_000).toISOString();
 
@@ -35,6 +42,8 @@ type Fixture = {
     armedBy?: string;
     oid?: string;
     contexts?: Ctx[];
+    /** The head carries the release-ok approval status (#445); default true. */
+    approved?: boolean;
     labels?: string[];
     /** Labels `gh pr view` sees at arm time (a hold set after the snapshot). */
     labelsNow?: string[];
@@ -81,7 +90,12 @@ function fake(f: Fixture) {
                       oid: f.pr.oid ?? "abc123",
                       statusCheckRollup: {
                         state: f.pr.state ?? "SUCCESS",
-                        contexts: { nodes: f.pr.contexts ?? [] },
+                        contexts: {
+                          nodes: [
+                            ...(f.pr.contexts ?? []),
+                            ...(f.pr.approved === false ? [] : [APPROVED]),
+                          ],
+                        },
                       },
                     },
                   },
@@ -555,6 +569,19 @@ describe("blocker", () => {
     expect(t[t.indexOf("--title") + 1]).not.toContain("24 hours");
   });
 
+  it("reminds gently after 3 days without approval on the current head, not before (#445)", async () => {
+    const two = await run({
+      pr: { createdAt: hoursAgo(48), labels: [], approved: false },
+    });
+    expect(two.r.action).toBe("none");
+    const four = await run({
+      pr: { createdAt: hoursAgo(96), labels: [OK_LABEL], approved: false },
+    });
+    expect(four.r).toEqual({ action: "opened" });
+    const t = four.g.wrote("issue create")[0] as string[];
+    expect(t[t.indexOf("--title") + 1]).toContain("3 days");
+  });
+
   it("opens nothing for a young, green PR", async () => {
     const { r, g } = await run({ pr: { createdAt: hoursAgo(23) } });
     expect(r.action).toBe("none");
@@ -756,5 +783,63 @@ describe("release-ok opt-in (#435, option B)", () => {
       ).action,
     ).not.toBe("disarmed");
     expect(theirs.wrote("pr merge")).toEqual([]);
+  });
+});
+
+describe("release-ok is tied to the head it was added on (#445)", () => {
+  it("never arms a labeled head without the approval status (release-please pushed since)", async () => {
+    const f = { pr: { labels: [OK_LABEL], approved: false } };
+    expect(await willWrite({ exec: fake(f).exec, repo: REPO })).toBe(false);
+    const g = fake(f);
+    const lines: string[] = [];
+    const r = await arm({
+      exec: g.exec,
+      repo: REPO,
+      log: (l) => lines.push(l),
+    });
+    expect(r).toEqual({ action: "not-ok", pr: 301 });
+    expect(lines.join("\n")).toMatch(/older head; remove and re-add it/);
+    expect(g.wrote("pr merge")).toEqual([]);
+  });
+
+  it("a failed or other-context status doesn't approve", async () => {
+    for (const c of [
+      { ...APPROVED, state: "FAILURE" },
+      { ...APPROVED, context: "ci" },
+      { __typename: "CheckRun", name: APPROVAL_CONTEXT, conclusion: "SUCCESS" },
+    ]) {
+      const g = fake({
+        pr: { labels: [OK_LABEL], approved: false, contexts: [c] as Ctx[] },
+      });
+      expect(
+        (await arm({ exec: g.exec, repo: REPO, log: () => {} })).action,
+        JSON.stringify(c),
+      ).toBe("not-ok");
+    }
+  });
+
+  it("arms the approved head, pinned to it", async () => {
+    const g = fake({ pr: { labels: [OK_LABEL], oid: "f00d" } });
+    expect(
+      (await arm({ exec: g.exec, repo: REPO, log: () => {} })).action,
+    ).toBe("armed");
+    const [m] = g.wrote("pr merge");
+    expect(m?.[(m?.indexOf("--match-head-commit") ?? 0) + 1]).toBe("f00d");
+  });
+
+  it("takes back the App's arm when the head lost its approval", async () => {
+    const g = fake({
+      pr: { armed: true, labels: [OK_LABEL], approved: false },
+    });
+    expect(
+      (
+        await arm({
+          exec: g.exec,
+          repo: REPO,
+          log: () => {},
+          appLogin: "oa-release",
+        })
+      ).action,
+    ).toBe("disarmed");
   });
 });
