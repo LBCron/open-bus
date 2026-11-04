@@ -378,6 +378,16 @@ describe("install: Codex restart hint (C27k)", () => {
     expect(belowDaemon(ctx)).toEqual(["", expect.any(String)]);
     expect(ctx.out().join("\n")).not.toContain("Restart the Codex app");
   });
+
+  it("also on --no-service, where the daemon is the user's own", async () => {
+    const ctx = withDaemon(["0.61.1"]);
+    expect(await run(ctx, { noService: true })).toBe(0);
+    const out = ctx.out().join("\n");
+    expect(out).toContain("Daemon running without a service");
+    expect(out).toContain(
+      "   Restart the Codex app and open Codex sessions to load the new OpenBus.",
+    );
+  });
 });
 
 describe("install: daemon confirmation", () => {

@@ -867,7 +867,7 @@ describe("codex code-mode attestation (C27)", () => {
     ).toEqual(no);
   });
 
-  it("refuses a missing item id or turn, an odd call id, or a non-exec item", async () => {
+  it("refuses a missing turn, an odd call id, or a non-exec item", async () => {
     const { home } = codexHome({
       thread: CM_THREAD,
       rollout:
@@ -899,11 +899,12 @@ describe("codex code-mode attestation (C27)", () => {
     const { home } = cmHome();
     const sleep = vi.fn(async () => {});
     const check = codexAttestor({ home, ...fakeProcs(), sleep });
+    // A real pre-C27a adapter sent neither an item id nor a turn id.
+    const staleHello = codeHello({ item_id: undefined, turn_id: undefined });
+    expect(check.attestNow(staleHello)).toEqual(stale);
     expect(check.attestNow(codeHello({ item_id: undefined }))).toEqual(stale);
     // No wait: no item id ever lands.
-    expect(await check.attest(codeHello({ item_id: undefined }))).toEqual(
-      stale,
-    );
+    expect(await check.attest(staleHello)).toEqual(stale);
     expect(sleep).not.toHaveBeenCalled();
     // Nothing was admitted or spent: the same call with its item id still is.
     expect(check.attestNow(codeHello())).toEqual(ok);

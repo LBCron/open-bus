@@ -247,9 +247,9 @@ keeps one use per model-written item, as with a `function_call`.
 - Single use is per daemon lifetime, as for `call_id` today.
 - Adapters outlive upgrades: the desktop app keeps one `open-bus mcp codex`
   per thread, so a thread opened before an upgrade runs the old adapter. One
-  from before C27a sends no `item_id`, and its exec calls are refused with
-  "its OpenBus server is older than the daemon. Ask the user to restart the Codex app."
-  (C27k); the app must be restarted.
+  from before C27a sends no `item_id`, so its exec calls are refused with
+  "its OpenBus server is older than the daemon. Ask the user to restart the
+  Codex app." (C27k); the app must be restarted.
 - The e2e (`pnpm e2e:codex`, "codex exec in code mode") switches 0.165 into
   code mode with `-c features.code_mode_only=true`; the fake model emits the
   `exec` calls.

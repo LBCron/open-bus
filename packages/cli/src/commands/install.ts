@@ -236,6 +236,8 @@ async function daemonStep(
     }
     // Started by the user: the "without a service" variant, not "run install".
     say(ctx, c.daemonRunning(st.pid, undefined, true), "");
+    // An open Codex thread keeps its old adapter, or none (C27k).
+    if (seen.codex) say(ctx, c.codexRestart());
     say(ctx, roster(ctx, st), "", c.statusHint());
     return true;
   }
