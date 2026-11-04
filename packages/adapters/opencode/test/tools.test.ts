@@ -3,10 +3,12 @@ import {
   CLIENT_VERSION,
   type DaemonClient,
   type Hello,
+  RENAME_COPY,
   statusSetText,
 } from "@ob/ipc";
 import { describe, expect, it, vi } from "vitest";
 import type { OpenCodeSession } from "../src/session.ts";
+import { rootSession } from "../src/session.ts";
 import { handleToolCall, nameOf, SESSION_META, TOOLS } from "../src/tools.ts";
 
 const receipt = async (f: { id?: string }) => ({
@@ -51,7 +53,7 @@ const call = (
   });
 
 describe("opencode mcp tools", () => {
-  it("exposes the six vendor-neutral tools", () => {
+  it("exposes the seven vendor-neutral tools", () => {
     expect(TOOLS.map((t) => t.name)).toEqual([
       "list_agents",
       "send_message",
@@ -59,6 +61,7 @@ describe("opencode mcp tools", () => {
       "self",
       "set_status",
       "card",
+      "rename",
     ]);
   });
 
@@ -293,6 +296,128 @@ describe("set_status and card in OpenCode (AC5b)", () => {
   });
 });
 
+describe("rename in OpenCode (#393)", () => {
+  /** One session whose daemon answers `rename` with `answer`. */
+  function daemonAt(answer: Record<string, unknown>, bus = "lane-6") {
+    const frames: { type: string; name?: string }[] = [];
+    const connect = vi.fn(async () => ({
+      welcome: { bus_name: bus },
+      request: vi.fn(async (f: { type: string; id?: string }) => {
+        frames.push(f as { type: string; name?: string });
+        return { v: 1, id: f.id ?? "1", ...answer };
+      }),
+      close: () => {},
+    })) as unknown as (h: Hello) => Promise<DaemonClient>;
+    const run = (args: Record<string, unknown>, title: string | null = null) =>
+      handleToolCall({
+        name: "rename",
+        args,
+        meta: { [SESSION_META]: "ses_a" },
+        connect,
+        resolve: async () => ({ root: "ses_a", directory: "/work/a", title }),
+      });
+    return { frames, run };
+  }
+
+  const agent = (r: Record<string, unknown> = {}) => ({
+    name: "lane-6",
+    namespace: "ns",
+    kind: "opencode",
+    live: true,
+    global: false,
+    ...r,
+  });
+
+  it("is listed: a shared service knows no daemon version at tools/list", () => {
+    expect(TOOLS.map((t) => t.name)).toContain("rename");
+  });
+
+  it("at the gate: one rename frame, and the copy says what you are", async () => {
+    const d = await daemonAt(
+      {
+        type: "agent",
+        agent: agent({
+          former_names: [
+            { name: "code-96", expires_at: "2026-10-29T13:00:00Z" },
+          ],
+        }),
+      },
+      "code-96",
+    );
+    const out = await d.run({ name: "lane-6" }, "Code 96");
+    expect(out.isError).toBeFalsy();
+    expect(out.content[0]?.text).toBe(
+      "You are now lane-6 on the bus.\ncode-96 still reaches you until 2026-10-29 13:00 UTC.",
+    );
+    expect(d.frames).toEqual([{ type: "rename", name: "lane-6", late: true }]);
+  });
+
+  it("below the gate, the daemon's bad_frame is the update copy", async () => {
+    const d = await daemonAt({
+      type: "error",
+      code: "bad_frame",
+      message: "Invalid input",
+    });
+    expect(await d.run({ name: "lane-6" })).toMatchObject({
+      isError: true,
+      content: [{ text: CARD_COPY.unsupported }],
+    });
+  });
+
+  it("a hub rate limit is Design's line", async () => {
+    const d = await daemonAt({
+      type: "error",
+      code: "rate_limited",
+      message: "Too many renames",
+    });
+    expect(await d.run({ name: "lane-6" })).toMatchObject({
+      isError: true,
+      content: [{ text: RENAME_COPY.rate_limited }],
+    });
+  });
+
+  it("a retitled root session renames it on the next call, with no tool call of its own", async () => {
+    const hellos: Hello[] = [];
+    const connect = vi.fn(async (hello: Hello) => {
+      hellos.push(hello);
+      return {
+        welcome: { bus_name: "old-title" },
+        request: vi.fn(async (f: { id?: string }) => ({
+          v: 1,
+          id: f.id ?? "1",
+          type: "receipt",
+          msg_id: "m",
+          state: "pending",
+        })),
+        close: () => {},
+      } as unknown as DaemonClient;
+    }) as unknown as (h: Hello) => Promise<DaemonClient>;
+    let title = "Old title";
+    const send = () =>
+      handleToolCall({
+        name: "send_message",
+        args: { to: "peer", text: "hi" },
+        meta: { [SESSION_META]: "ses_root" },
+        connect,
+        resolve: (id) => rootSession(id, { api: sessions(), cache }),
+      });
+    // One service, one cache: the second call sees the new title.
+    const cache = new Map();
+    const sessions = () => async () => ({
+      id: "ses_root",
+      directory: "/work/a",
+      title,
+    });
+    await send();
+    title = "New title";
+    await send();
+    expect(hellos.map((h) => h.proposed_name)).toEqual([
+      "old-title",
+      "new-title",
+    ]);
+  });
+});
+
 describe("status in OpenCode (AC5c)", () => {
   const at = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
   const row = (r: Record<string, unknown>) => ({
@@ -352,7 +477,7 @@ describe("status in OpenCode (AC5c)", () => {
     );
   });
 
-  it("self and a receipt show nothing of an old hub's role or to_name", async () => {
+  it("self shows nothing of an old hub's role, and a receipt names a former one", async () => {
     const self = await run("self", {}, () => ({
       type: "agent",
       agent: row({ role: "lane-6" }),
@@ -369,6 +494,7 @@ describe("status in OpenCode (AC5c)", () => {
         to_name: "code-96",
       }),
     );
-    expect(sent.text).toBe("✓  Delivered to lane-6.");
+    // A former name (#393): the current name first, then the one asked for.
+    expect(sent.text).toBe("✓  Delivered to code-96 (formerly lane-6).");
   });
 });

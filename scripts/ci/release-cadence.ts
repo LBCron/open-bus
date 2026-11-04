@@ -17,6 +17,8 @@ const DAY_MS = 24 * 3600_000;
 export const DRAIN_CAP_MS = 30 * 60_000;
 /** On the release PR, this label stops the cadence from arming it (docs/ops/releases.md). */
 export const HOLD_LABEL = "release-hold";
+/** The CI check that fails while the hold is on (#435): a held release isn't a stuck one. */
+export const HOLD_CHECK = "release-hold";
 
 export type ExecResult = { code: number; stdout: string; stderr: string };
 export type Exec = (
@@ -318,7 +320,12 @@ const FAILED = new Set([
   "ACTION_REQUIRED",
   "STARTUP_FAILURE",
 ]);
+/** Failing checks, except the hold check itself (#435). */
 function failing(contexts: Context[]): { name: string; url?: string }[] {
+  return allFailing(contexts).filter((f) => f.name !== HOLD_CHECK);
+}
+
+function allFailing(contexts: Context[]): { name: string; url?: string }[] {
   const out: { name: string; url?: string }[] = [];
   for (const c of contexts) {
     if (c.__typename === "StatusContext") {
@@ -396,7 +403,10 @@ export async function blocker(o: {
   }
 
   if (pr) {
-    const bad = pr.rollup === "FAILURE" || pr.rollup === "ERROR";
+    // A rollup failing only on the hold check is a held release, not a stuck one.
+    const bad =
+      (pr.rollup === "FAILURE" || pr.rollup === "ERROR") &&
+      (failing(pr.contexts).length > 0 || allFailing(pr.contexts).length === 0);
     const old = o.now() - Date.parse(pr.createdAt) > DAY_MS;
     if (!bad && !old)
       return closed.length

@@ -94,6 +94,16 @@ export const seesRename = (clientVersion: string | undefined): boolean =>
   clientVersion !== undefined && semverGte(clientVersion, RENAME_MIN_CLIENT);
 
 /**
+ * Whether the daemon an adapter talks to takes the `rename` frame (#393),
+ * from the `daemon_version` its `agent` answer carries: the same gate as an
+ * adapter's IPC marker, because one release carries the frame and the copy
+ * that goes with it. Unknown (no answer yet, or a daemon that predates the
+ * field) is below the gate.
+ */
+export const daemonRenames = (daemonVersion: string | undefined): boolean =>
+  seesRename(daemonVersion);
+
+/**
  * A daemon frame as a client below RENAME_MIN_CLIENT must receive it (#393):
  * no former names on a roster, self or status row, and no former-name
  * `to_name` on a receipt. A `renamed` push never goes to such a client at all

@@ -21,7 +21,38 @@ describe("opencode root sessions", () => {
     expect(await rootOf("ses_child", { api, cache })).toBe("ses_root");
     expect(await rootOf("ses_child", { api, cache })).toBe("ses_root");
     expect(await rootOf("ses_root", { api, cache })).toBe("ses_root");
-    expect(api).toHaveBeenCalledTimes(2); // child + root, once
+    // The child + its root, once: the cache holds the chain and the directory.
+    expect(api).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads the root's title fresh every time: retitling is a rename (#393)", async () => {
+    const titles: Record<string, string> = { ses_root: "Old title" };
+    const api: Api = async (op, params) =>
+      op === "session.get"
+        ? params.sessionID === "ses_child"
+          ? { id: "ses_child", parentID: "ses_root" }
+          : {
+              id: "ses_root",
+              directory: "/work/app",
+              title: titles.ses_root,
+            }
+        : undefined;
+    const cache = new Map();
+    expect((await rootSession("ses_child", { api, cache }))?.title).toBe(
+      "Old title",
+    );
+    titles.ses_root = "New title";
+    // Cached, and still the title it has now.
+    expect((await rootSession("ses_child", { api, cache }))?.title).toBe(
+      "New title",
+    );
+    // A title that cannot be read is "cannot tell", never an invented name.
+    const down: Api = async () => {
+      throw new Error("service down");
+    };
+    expect(await rootSession("ses_child", { api: down, cache })).toBeNull();
+    const gone: Api = async () => undefined;
+    expect(await rootSession("ses_child", { api: gone, cache })).toBeNull();
   });
 
   it("names the root's own directory, top-level or under location", async () => {

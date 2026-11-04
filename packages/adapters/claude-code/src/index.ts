@@ -36,4 +36,4 @@ export {
   socketDirProblem,
   unsafeSocketDir,
 } from "./socket-path.ts";
-export { callTool, TOOLS, type ToolResult } from "./tools.ts";
+export { callTool, offeredTools, TOOLS, type ToolResult } from "./tools.ts";

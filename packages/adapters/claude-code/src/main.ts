@@ -14,7 +14,7 @@ import {
   sessionHello,
 } from "./session.ts";
 import { daemonSocketPath, socketDirProblem } from "./socket-path.ts";
-import { callTool, TOOLS } from "./tools.ts";
+import { callTool, offeredTools } from "./tools.ts";
 
 const SESSIONS = claudeSessionsDir();
 const HOME = openbusHome();
@@ -39,12 +39,30 @@ async function connect(): Promise<DaemonClient | null> {
   }
 }
 
+/**
+ * The daemon's version, from a `self` on a connection of its own (#393):
+ * `rename` is offered only at the rename gate, and a daemon that cannot be
+ * asked hides it. One local round trip, at list time only.
+ */
+async function daemonVersion(): Promise<string | undefined> {
+  const client = await connect();
+  if (!client) return undefined;
+  try {
+    const r = await client.request({ type: "self" });
+    return r.type === "agent" ? r.daemon_version : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    client.close();
+  }
+}
+
 const server = new Server(
   { name: "openbus", version: "0.1.0" },
   { capabilities: { tools: {} } },
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [...TOOLS],
+  tools: offeredTools(await daemonVersion()),
 }));
 server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   const client = await connect();
