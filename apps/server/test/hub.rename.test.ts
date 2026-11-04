@@ -1397,3 +1397,78 @@ it("#452: a global's unscoped send is ambiguous across a current name and a form
   });
   d.close();
 });
+
+describe("#451 review of 8038558", () => {
+  for (const how of ["move", "flip"] as const)
+    it(`#452 stays ambiguous after the renamed agent's ${how}`, async () => {
+      const d = await at();
+      const x = ns("rn");
+      const y = ns("rn");
+      const z = ns("rn");
+      const w = ns("rn");
+      const alice = uniq("alice");
+      await reg(d, "a", alice, x);
+      const bob = uniq("bob");
+      await renamed(d, "a", bob);
+      expect(await reg(d, "c", alice, y)).toBe(alice);
+      await reg(d, "g", uniq("G"), z, { global: true });
+      expect(await send(d, "g", alice)).toMatchObject({
+        state: "refused",
+        reason: "ambiguous",
+      });
+      if (how === "move") expect(await reg(d, "a", bob, w)).toBe(bob);
+      else expect(await reg(d, "a", bob, x, { global: true })).toBe(bob);
+      expect(await send(d, "g", alice)).toMatchObject({
+        state: "refused",
+        reason: "ambiguous",
+      });
+      d.close();
+    });
+
+  it("a live move whose name gets a suffix reserves the old name in the old namespace", async () => {
+    const d = await at();
+    const n1 = ns("rn");
+    const n2 = ns("rn");
+    const mine = uniq("Mine");
+    await reg(d, "a", mine, n1);
+    expect(await reg(d, "c", mine, n2)).toBe(mine);
+    expect(await reg(d, "a", mine, n2)).toBe(`${mine}-2`);
+    expect(await formerRows(`${mine}-2`)).toEqual([mine]);
+    expect(await reg(d, "x", mine, n1)).toBe(`${mine}-2`);
+    d.close();
+  });
+
+  it("a global moving its home namespace keeps its former names resolving", async () => {
+    const d = await at();
+    const n1 = ns("rn");
+    const n2 = ns("rn");
+    const n3 = ns("rn");
+    await reg(d, "s", uniq("Sender"), n3);
+    const g = uniq("Glob");
+    await reg(d, "a", g, n1, { global: true });
+    const g2 = uniq("Glob2");
+    await renamed(d, "a", g2);
+    expect(await reg(d, "a", g2, n2, { global: true })).toBe(g2);
+    expect(await send(d, "s", g)).toMatchObject({
+      state: "pending",
+      to_name: g2,
+    });
+    expect(
+      row(await list(d, "s"), g2)?.former_names?.map((f) => f.name),
+    ).toEqual([g]);
+    expect(await reg(d, "x", g, n3)).toBe(`${g}-2`);
+    // A default former name stays too: the scope did not change.
+    const minted = await reg(d, "b", uniq("gpi"), n1, {
+      global: true,
+      kind: "default",
+    });
+    const b2 = uniq("GlobB");
+    await renamed(d, "b", b2);
+    expect(await reg(d, "b", b2, n2, { global: true })).toBe(b2);
+    expect(await send(d, "s", minted)).toMatchObject({
+      state: "pending",
+      to_name: b2,
+    });
+    d.close();
+  });
+});

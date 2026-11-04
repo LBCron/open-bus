@@ -890,11 +890,11 @@ function commitName(
     );
   const lname = a.name.toLowerCase();
   sql.exec(
-    "delete from former_names where agent_id = ? and lname = ? and namespace = ? and global = ?",
+    "delete from former_names where agent_id = ? and lname = ? and global = ? and (global = 1 or namespace = ?)",
     agentId,
     lname,
-    at.namespace,
     at.global ? 1 : 0,
+    at.namespace,
   );
 }
 
@@ -965,16 +965,16 @@ function formerRoom(
       sql,
       `select count(*) as n from former_names indexed by former_names_agent
         where agent_id = ? and expires_at > ? and kind = 'chosen'
-          and not (lname = ? and namespace = ? and global = ?)
-          and not (lname = ? and namespace = ? and global = ?)`,
+          and not (lname = ? and global = ? and (global = 1 or namespace = ?))
+          and not (lname = ? and global = ? and (global = 1 or namespace = ?))`,
       agentId,
       now,
       lformer,
-      from.namespace,
       from.global ? 1 : 0,
+      from.namespace,
       lname,
-      to.namespace,
       to.global ? 1 : 0,
+      to.namespace,
     )?.n ?? 0;
   return chosen < LIMITS.maxFormerNames;
 }
@@ -1009,16 +1009,16 @@ function recordRename(
   // expired rows, before the cap is applied. A row in another scope stays.
   sql.exec(
     `delete from former_names where agent_id = ? and (expires_at <= ?
-       or (lname = ? and namespace = ? and global = ?)
-       or (lname = ? and namespace = ? and global = ?))`,
+       or (lname = ? and global = ? and (global = 1 or namespace = ?))
+       or (lname = ? and global = ? and (global = 1 or namespace = ?)))`,
     agentId,
     now,
     lformer,
-    from.namespace,
     from.global ? 1 : 0,
+    from.namespace,
     lname,
-    to.namespace,
     to.global ? 1 : 0,
+    to.namespace,
   );
   if (lformer === lname) return null;
   const minted = mintedFor(sql, agentId, lformer);
@@ -1114,8 +1114,16 @@ function agentUp(
   const to: Scope = { namespace: f.namespace, global: f.global };
   let armAt: number | null = null;
   const asked = candidateName(f.proposed_name).toLowerCase();
+  // A global's scope is every namespace: moving its home is no move.
+  const sameScope =
+    existing !== null &&
+    existing.global === (f.global ? 1 : 0) &&
+    (f.global || existing.namespace === f.namespace);
+  // Nit 1 applies to a reopen or an unchanged scope only: a live move whose
+  // name gets a suffix leaves the old name in the old scope (#451 review).
   const decollided =
     existing !== null &&
+    (!wasLive || sameScope) &&
     asked === existing.name.toLowerCase() &&
     assigned.name.toLowerCase() !== asked;
   if (existing && assigned.name !== existing.name && !decollided) {
@@ -1181,12 +1189,7 @@ function agentUp(
     );
   // #451: a namespace move or a global flip keeps the chosen former names
   // reserved in the old scope, where they resolve to no one.
-  if (
-    existing &&
-    (existing.namespace !== f.namespace ||
-      existing.global !== (f.global ? 1 : 0))
-  )
-    keepScopedNames(sql, id, now);
+  if (existing && !sameScope) keepScopedNames(sql, id, now);
   commitName(sql, id, assigned, to, now);
   // AC3: a reopened session starts with no status (a live move keeps it).
   if (existing && !wasLive) clearStatus(sql, [id]);
@@ -1348,7 +1351,7 @@ function formerNamesOf(
     `select f.agent_id as agentId, f.name, f.expires_at as expiresAt from former_names f
       join agents a on a.id = f.agent_id
       where f.agent_id in (select value from json_each(?)) and f.expires_at > ?
-        and f.namespace = a.namespace and f.global = a.global
+        and f.global = a.global and (f.global = 1 or f.namespace = a.namespace)
       order by f.agent_id, f.expires_at desc, f.rowid desc`,
     JSON.stringify(rows.map((r) => r.id)),
     now,
@@ -1682,7 +1685,8 @@ function liveAnywhere(
  * it) or a global homed in `homedIn`. Globals first. A former name is never
  * ambiguous within a scope (a chosen one is reserved, a default one is
  * never minted again), so `limit` > 1 only matters across namespaces.
- * #451: only a name left in the agent's current scope resolves; one left
+ * #451: only a name left in the agent's current scope resolves (a global's
+ * scope is every namespace: a global moving its home keeps them); one left
  * before a move or flip is reserved there and reaches no one.
  */
 function liveFormer(
@@ -1703,7 +1707,7 @@ function liveFormer(
     `select ${AGENT_COLS} from agents where org_id = ? and live = 1
        and id in (select f.agent_id from former_names f indexed by former_names_lname
                    where f.org_id = ? and f.lname = ? and f.expires_at > ?
-                     and f.namespace = agents.namespace and f.global = agents.global)
+                     and f.global = agents.global and (f.global = 1 or f.namespace = agents.namespace))
        ${where} order by global desc limit ?`,
     OWNER_ORG_ID,
     OWNER_ORG_ID,
@@ -1711,6 +1715,32 @@ function liveFormer(
     now,
     ...(scope === null ? [] : ["ns" in scope ? scope.ns : scope.homedIn]),
     limit,
+  );
+}
+
+/**
+ * #452: whether a live agent other than `exceptId` holds `lname` as a former
+ * name in its grace: one that resolves, or a chosen one reserved in any
+ * scope (left behind by a move or flip; the set nameTaken reserves).
+ */
+function heldElsewhere(
+  sql: SqlStorage,
+  lname: string,
+  now: number,
+  exceptId: string,
+): boolean {
+  return (
+    one<{ x: number }>(
+      sql,
+      `select exists (select 1 from former_names f indexed by former_names_lname
+         join agents a on a.id = f.agent_id
+         where f.org_id = ? and f.lname = ? and f.expires_at > ? and a.live = 1 and a.id != ?
+           and (f.kind = 'chosen' or (f.global = a.global and (f.global = 1 or f.namespace = a.namespace)))) as x`,
+      OWNER_ORG_ID,
+      lname,
+      now,
+      exceptId,
+    )?.x === 1
   );
 }
 
@@ -1783,12 +1813,13 @@ function resolveTarget(
   if (live.length > 1) return refused("ambiguous");
   // Then former names elsewhere, under the same ambiguity rule. #452: one
   // live name in one namespace and another agent's former name in another
-  // is ambiguous too (a chosen former name is reserved only in its scope).
-  const former = liveFormer(sql, lname, now, null, 2);
+  // is ambiguous too (a chosen former name is reserved only in its scope),
+  // counting a chosen one left behind by a move or flip (#451 review).
   if (first)
-    return former.some((r) => r.id !== first.id)
+    return heldElsewhere(sql, lname, now, first.id)
       ? refused("ambiguous")
       : { ok: true, agent: first };
+  const former = liveFormer(sql, lname, now, null, 2);
   const f = former[0];
   if (f && (f.global === 1 || former.length === 1))
     return { ok: true, agent: f };
