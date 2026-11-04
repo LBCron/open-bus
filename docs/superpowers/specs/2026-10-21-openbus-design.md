@@ -51,6 +51,7 @@ It extends agent-bus (`~/code/projects/agent-bus`), which works only on a single
 ### Login **[user]** + **[call]**
 
 Cloudflare Access is used as an OIDC identity provider only (a SaaS app, as open-artifacts does), not as a proxy in front of the Worker.
+
 1. `npx open-bus` asks the Worker for a device code and opens `/approve/<code>` in the browser. With no browser, it prints the URL and code instead.
 2. The user signs in through Access (the Worker's OIDC callback, which honours `next`) and approves the machine on a page the Worker renders, as open-artifacts' consent page is.
 3. The CLI polls and receives a long-lived `ob_machine_<random>` token. The hub stores only its hash, together with a label, `last_used` and `revoked_at`.
@@ -77,6 +78,7 @@ Setup needs a Cloudflare API token with "Access: Apps and Policies: Edit", becau
 ### Data model **[call]**
 
 Every row carries `org_id`, which for now is the owner. The tables:
+
 - `machines(id, org_id, label, token_hash, created_at, last_used, revoked_at)`
 - `agents(id, org_id, namespace, name, kind, machine_id, native_ref, global, last_name, live, updated_at)`
 - `mail(id, org_id, namespace, to_agent, from_agent, body, created_at, expires_at)`
@@ -94,11 +96,11 @@ Queue or refuse **[call]**:
 
 ## Per-harness delivery
 
-| Harness     | Sends                                                                                                                                                                                      | Woken by                                                                                                                                                                                                 | Identity                                                                                                      |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Harness | Sends | Woken by | Identity |
+|---|---|---|---|
 | Claude Code | **[user]** An OpenBus MCP server, installed globally, provides namespace-scoped `list_agents`, `send_message`, `fetch` and `self`. Native `SendMessage` is not used to reach remote peers. | The daemon dials the Claude session's own UDS socket and injects the frame natively, with a per-peer return socket so that native replies route back. No published fake peers and no per-peer processes. | `~/.claude/sessions/<pid>.json`, pid + `procStart`; the MCP server finds its session through its ancestor pid |
-| OpenCode v2 | An MCP tool on the shared service MCP server. The session comes from `_meta["ai.opencode/sessionID"]` on each call and maps to its root via `parentID`.                                    | The daemon runs `opencode api session.prompt` with `delivery:"queue"`, only while a TUI plugin's presence file lists the session.                                                                        | Presence files plus a pid-reuse guard                                                                         |
-| Pi          | Extension tool, or Pi's built-in MCP via `registerMcpServer` (re-registered on every load).                                                                                                | `pi.sendMessage(..., {triggerTurn, deliverAs})` from the extension                                                                                                                                       | `sessionManager.getSessionId()`, `ctx.cwd`                                                                    |
+| OpenCode v2 | An MCP tool on the shared service MCP server. The session comes from `_meta["ai.opencode/sessionID"]` on each call and maps to its root via `parentID`. | The daemon runs `opencode api session.prompt` with `delivery:"queue"`, only while a TUI plugin's presence file lists the session. | Presence files plus a pid-reuse guard |
+| Pi | Extension tool, or Pi's built-in MCP via `registerMcpServer` (re-registered on every load). | `pi.sendMessage(..., {triggerTurn, deliverAs})` from the extension | `sessionManager.getSessionId()`, `ctx.cwd` |
 
 All of agent-bus's OpenCode v2 learnings apply (`agent-bus/docs/superpowers/specs/2026-10-21-opencode-session-peers-design.md`, commit 6cb47db). The shared MCP server must never crash, and setup must run `opencode service restart`.
 
@@ -113,6 +115,7 @@ Oversized messages: the notice names a `fetch` id. Claude fetches with the MCP t
 ## Tech and ops: mirror open-artifacts **[user]**
 
 The same stack and process as `~/code/projects/openartifacts`:
+
 - **Stack:** a pnpm monorepo on Node 22, with biome, TypeScript and vitest (`@cloudflare/vitest-plugin`). Hono in the Worker. The dashboard uses Vite, React 19, TanStack and Tailwind/shadcn. The landing page uses Astro and serves `llms.txt`.
 - **Process:**
   - Conventional Commits

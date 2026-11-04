@@ -21,6 +21,7 @@ app's and CLI's shipped code. The run below would confirm it.
 | Adapter unchanged?      | Yes. `findSession` walks from `open-bus mcp` up to the nearest `<pid>.json` and needs only `sessionId` + `procStart` (+ `messagingSocketPath` and the key). It never reads `kind`, `entrypoint` or `tmux`. The optional `disclaimer --pgroup` wrapper sits above `claude`, so the walk never reaches it.                                                                            | `packages/adapters/claude-code/src/session.ts` |
 
 Side notes:
+
 - The desktop app reads `~/.claude/sessions` itself to show CLI liveness (static A5).
 - The CLI's own peer list labels these sessions `desktop` (static B3).
 - The app pins its CLI version independently of `~/.local/bin/claude`, so Code-tab sessions can lag behind or run ahead of the terminal's peer protocol.
@@ -28,6 +29,7 @@ Side notes:
 ## Live check (2026-10-26, the user started one Code-tab session)
 
 A local session in `~/tmp/probe-dir` started from the Code tab: pid 37491, its parent is Claude.app's `disclaimer` helper, and it runs bundled Claude Code 2.1.308.
+
 - **sessions json:** `~/.claude/sessions/37491.json` has `kind: interactive`, `entrypoint: claude-desktop`, `procStart`, `cwd` and `messagingSocketPath: /tmp/cc-socks/37491.sock`, with no `tmux`.
 - **Socket and key:** the socket is `srw-------`. The key is `~/.claude/sessions/37491.<hash>.key`, mode 0600, 108 bytes, with its value not read.
 - **MCP:** the session's children include `~/.openbus/bin/dist/index.js mcp claude`, so the openbus server loaded. The strict-MCP path (#252) wasn't taken on this launch.

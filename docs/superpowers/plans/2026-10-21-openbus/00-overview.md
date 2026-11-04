@@ -15,37 +15,38 @@
 
 **Tech stack:** It mirrors `~/code/projects/openartifacts`, so copy before you write.
 
-| Area                 | Choice                                                                                      |
-| -------------------- | ------------------------------------------------------------------------------------------- |
+| Area | Choice |
+|---|---|
 | Language and tooling | TypeScript 5.x, pnpm 10 workspaces, Biome, Vitest + `@cloudflare/vitest-plugin`, Playwright |
-| Server               | Hono, Zod 4. No D1, KV or R2: all state lives in the hub's SQLite.                          |
-| Dashboard            | React 19, Vite, TanStack Router and Query, Tailwind 4 with `packages/ui`                    |
-| Landing              | Astro, serving `llms.txt`                                                                   |
-| Client               | Node 22+ CLI and daemon bundled into one npm package with esbuild                           |
-| Setup                | `scripts/setup`, a step runner copied from OA                                               |
+| Server | Hono, Zod 4. No D1, KV or R2: all state lives in the hub's SQLite. |
+| Dashboard | React 19, Vite, TanStack Router and Query, Tailwind 4 with `packages/ui` |
+| Landing | Astro, serving `llms.txt` |
+| Client | Node 22+ CLI and daemon bundled into one npm package with esbuild |
+| Setup | `scripts/setup`, a step runner copied from OA |
 
 **Spec:** `docs/superpowers/specs/2026-10-21-openbus-design.md`. Executors read the spec and this plan together.
 
 ## Plan files
 
-| File                | Track                                                                                                                                                   | Owner session                                                                    |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `00-overview.md`    | Shared rules, contracts, milestones, review focus                                                                                                       | **openbus-e0** (manager)                                                         |
-| `01-foundation.md`  | F1–F4: repo scaffold, `packages/shared` contract, test harness, CI/CD and staging                                                                       | **OpenBus Platform**, except F2 (contract), which belongs to **OpenBus Backend** |
-| `02-backend.md`     | B*: Worker, auth (copied from OA), device flow, hub Durable Object, roster, namespaces, mail, revoke                                                    | **OpenBus Backend**                                                              |
-| `03-design.md`      | D*: DIRECTION (Studio adopted, re-prefixed `--ob-*`), `packages/ui` tokens, screens, CLI terminal palette, landing                                      | **OpenBus Design**                                                               |
-| `04-frontend.md`    | FE*: dashboard pages for machines and for the live view of agents and namespaces, plus end-to-end tests                                                 | **OpenBus Frontend**                                                             |
-| `05-client.md`      | C*: `packages/cli` (the published `open-bus`), `packages/daemon`, `packages/adapters/{mcp-json,claude-code,opencode,pi}`, `packaging/{launchd,systemd}` | **OpenBus Frontend-2** (client track)                                            |
-| `06-integration.md` | I*: cross-track end-to-end tests on staging (spec scenarios 1–7), install path, npm publish, release, prod                                              | **OpenBus Platform**, with the manager verifying                                 |
+| File | Track | Owner session |
+|---|---|---|
+| `00-overview.md` | Shared rules, contracts, milestones, review focus | **openbus-e0** (manager) |
+| `01-foundation.md` | F1–F4: repo scaffold, `packages/shared` contract, test harness, CI/CD and staging | **OpenBus Platform**, except F2 (contract), which belongs to **OpenBus Backend** |
+| `02-backend.md` | B*: Worker, auth (copied from OA), device flow, hub Durable Object, roster, namespaces, mail, revoke | **OpenBus Backend** |
+| `03-design.md` | D*: DIRECTION (Studio adopted, re-prefixed `--ob-*`), `packages/ui` tokens, screens, CLI terminal palette, landing | **OpenBus Design** |
+| `04-frontend.md` | FE*: dashboard pages for machines and for the live view of agents and namespaces, plus end-to-end tests | **OpenBus Frontend** |
+| `05-client.md` | C*: `packages/cli` (the published `open-bus`), `packages/daemon`, `packages/adapters/{mcp-json,claude-code,opencode,pi}`, `packaging/{launchd,systemd}` | **OpenBus Frontend-2** (client track) |
+| `06-integration.md` | I*: cross-track end-to-end tests on staging (spec scenarios 1–7), install path, npm publish, release, prod | **OpenBus Platform**, with the manager verifying |
 
 Each lead writes its own track file using superpowers:writing-plans, against the spec and this overview. It sends the manager the file path before starting. The manager checks it against the spec and these contracts.
 
 ## How each lead executes
 
 This is OA's loop, unchanged (see `openartifacts/docs/superpowers/plans/2026-10-18-open-artifacts/00-overview.md` §"How each lead executes"):
+
 1. An implementer subagent works TDD.
 2. A spec-compliance reviewer checks the diff.
-3. An adversarial reviewer, briefed: _"Your job is to break this. Find inputs, sequences, or environments where it fails, leaks across namespaces, spoofs identity, double-delivers, or contradicts the spec. Write the failing test for each finding."_
+3. An adversarial reviewer, briefed: *"Your job is to break this. Find inputs, sequences, or environments where it fails, leaks across namespaces, spoofs identity, double-delivers, or contradicts the spec. Write the failing test for each finding."*
 4. Fix until both pass.
 5. One PR per task. Get CI green, merge, deploy to staging and smoke-test it.
 6. Run superpowers:verification-before-completion with the output pasted.
@@ -76,13 +77,13 @@ At each milestone, the lead runs a whole-track adversarial review and reports to
 
 ## Working copies
 
-| Lead                | Worktree                                                                    |
-| ------------------- | --------------------------------------------------------------------------- |
-| Platform            | `/Users/leonardourbina/code/projects/openbus` (the main checkout, F1 first) |
-| Backend             | `/Users/leonardourbina/code/projects/openbus-be`                            |
-| Frontend            | `/Users/leonardourbina/code/projects/openbus-fe`                            |
-| Frontend-2 (client) | `/Users/leonardourbina/code/projects/openbus-cl`                            |
-| Design              | `/Users/leonardourbina/code/projects/openbus-de`                            |
+| Lead | Worktree |
+|---|---|
+| Platform | `/Users/leonardourbina/code/projects/openbus` (the main checkout, F1 first) |
+| Backend | `/Users/leonardourbina/code/projects/openbus-be` |
+| Frontend | `/Users/leonardourbina/code/projects/openbus-fe` |
+| Frontend-2 (client) | `/Users/leonardourbina/code/projects/openbus-cl` |
+| Design | `/Users/leonardourbina/code/projects/openbus-de` |
 
 Everyone except Platform runs `git worktree add` once F1 is on `origin/main`. Every page the user reads goes to artifacts.leourbina.com through the `open-artifacts` MCP, not a localhost companion.
 
@@ -103,19 +104,19 @@ The names and shapes below are fixed. Encoding details are Backend's, in F2. Eve
 
 **Values pinned by the spec:**
 
-| Thing               | Value                                                                                                                 |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Machine token       | `ob_machine_` followed by 32 base58 chars. The hub stores only its SHA-256 hash.                                      |
-| IDs                 | 16-char base58 from `newId()`, as in OA                                                                               |
-| Device code         | `user_code`: 8 chars from `[A-Z2-9]`, shown as `XXXX-XXXX`; it expires after 10 minutes. The CLI polls every 5 s.     |
-| Inline delivery cap | **32 KB** of UTF-8 body. Anything above arrives as a notice plus `fetch`.                                             |
-| Hard max message    | **1 MB**. Larger is refused with `too_large`.                                                                         |
-| Mail expiry         | **3600 s** after it's sent                                                                                            |
-| Inbox cap           | **50** undelivered messages per agent, then `refused: inbox_full`                                                     |
-| Receipt states      | `pending` \| `delivered` \| `expired` \| `refused`                                                                    |
-| Refusal reasons     | `unknown_agent` \| `closed` \| `inbox_full` \| `too_large` \| `other_namespace` \| `revoked` \| `ambiguous`           |
-| Revoke close code   | WebSocket close `4403`                                                                                                |
-| Config file         | `.openbus.json` `{ "namespace"?: string, "global"?: boolean }`, read from the session's start directory or any parent |
+| Thing | Value |
+|---|---|
+| Machine token | `ob_machine_` followed by 32 base58 chars. The hub stores only its SHA-256 hash. |
+| IDs | 16-char base58 from `newId()`, as in OA |
+| Device code | `user_code`: 8 chars from `[A-Z2-9]`, shown as `XXXX-XXXX`; it expires after 10 minutes. The CLI polls every 5 s. |
+| Inline delivery cap | **32 KB** of UTF-8 body. Anything above arrives as a notice plus `fetch`. |
+| Hard max message | **1 MB**. Larger is refused with `too_large`. |
+| Mail expiry | **3600 s** after it's sent |
+| Inbox cap | **50** undelivered messages per agent, then `refused: inbox_full` |
+| Receipt states | `pending` \| `delivered` \| `expired` \| `refused` |
+| Refusal reasons | `unknown_agent` \| `closed` \| `inbox_full` \| `too_large` \| `other_namespace` \| `revoked` \| `ambiguous` |
+| Revoke close code | WebSocket close `4403` |
+| Config file | `.openbus.json` `{ "namespace"?: string, "global"?: boolean }`, read from the session's start directory or any parent |
 
 **Wire frames on the daemon ↔ hub WebSocket.** Each carries `v: 1` and an `id` for correlation.
 - Daemon → hub:
@@ -156,6 +157,7 @@ The names and shapes below are fixed. Encoding details are Backend's, in F2. Eve
 ## Review Focus
 
 These are the five failure modes most likely to bite a real user that ordinary task tests wouldn't catch. Each has a pinned test in the track that owns the code.
+
 1. **Identity spoofing.** A tool call names another sender. One OpenCode service hosts two sessions. A frame's `from_ref` wasn't registered on that socket. A stale presence file belongs to a reused pid. Expected: rejected, or attributed to the true session. **Pinned in:** C (adapter and daemon identity tests) and B (`hub.from_ref.test.ts`).
 2. **Namespace leak.** `list`, `send` and `fetch` across namespaces, a `global` agent, and two namespaces on one machine. Expected: invisible and refused with `other_namespace`. A global agent sees and reaches everything, and anyone can reach it. **Pinned in:** B (`hub.namespace.matrix.test.ts`).
 3. **Reconnect mid-delivery and hub eviction.** The daemon drops after `deliver` but before `ack`. The hub is evicted while holding unacked mail in memory. Expected: no duplicate in the conversation, because the daemon de-duplicates by `msg_id`, and the receipt never says `delivered` falsely. Lost in-memory mail surfaces as `expired` to the sender. **Pinned in:** B (`hub.reconnect.test.ts`) and C (`daemon.dedupe.test.ts`).

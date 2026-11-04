@@ -1,5 +1,1 @@
-{
-  "cmd": "remove",
-  "label": "ai.open-bus.daemon.42310078",
-  "r": { "unit": "launchd" }
-}
+{"cmd":"remove","label":"ai.open-bus.daemon.42310078","r":{"unit":"launchd"}}

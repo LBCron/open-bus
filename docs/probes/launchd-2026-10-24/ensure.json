@@ -1,6 +1,1 @@
-{
-  "cmd": "ensure",
-  "kind": "launchd",
-  "label": "ai.open-bus.daemon.42310078",
-  "r": {}
-}
+{"cmd":"ensure","kind":"launchd","label":"ai.open-bus.daemon.42310078","r":{}}

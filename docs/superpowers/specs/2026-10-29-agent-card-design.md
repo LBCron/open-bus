@@ -70,6 +70,7 @@ Origin: Blue Banjo asks M2 (role addresses) and N2 (status), and the Oct 24 iden
 ### Wire compatibility (all new fields)
 
 The wire decoders are strict (CONTRACT.md "additive fields"), so every new server-to-daemon field is gated by `semverGte(hello.client_version, AGENT_CARD_MIN_CLIENT)`, where `AGENT_CARD_MIN_CLIENT` is the first daemon release that decodes them. Below the gate:
+
 - Roster rows carry neither `role` nor `status*`.
 - Receipts carry no `to_name`.
 - `role_vacant` is sent as `unknown_agent`.
@@ -93,6 +94,7 @@ New enum values go only into `REFUSAL_REASONS` and `ErrorFrame.code`, and only f
 **Invariant: one human owner per bus.** OpenBus is single-owner by design: the base spec makes organizations and sharing a non-goal, and sign-in admits only `OWNER_EMAIL` (`isOwner`). `/link` and every card are issued only for that owner. Before any multi-user change ships, the `owner` input must include that user's stable id. That change must ship together with the multi-user change, not after it, and the spec for it must say so. It is neither the email nor an OIDC sub, because each Access app issues a different sub. OA pins `(iss, owner)` per OA user and stores no email.
 
 **Owner-only REST**, with the same checks as the roles routes:
+
 - `GET /api/v1/linked-apps` lists linked apps.
 - `DELETE /api/v1/linked-apps/{aud}` unlinks one. After that the bus refuses to sign cards for that `aud` (`not_linked`).
 
@@ -101,6 +103,7 @@ Unlinking works from both sides. Unlinking in OA deletes OA's pin. After a bus-s
 ### The card
 
 **Issuing:**
+
 1. The agent calls OA's `present_card()`, which returns a nonce bound to the agent's OAuth grant.
 2. The agent calls the bus tool `card({audience, nonce})`. The daemon attests the caller as for every frame and sends `card_request {id, from_ref, aud, nonce}`.
    - `nonce` must match `^[A-Za-z0-9_-]{16,128}$`.
@@ -111,6 +114,7 @@ Unlinking works from both sides. Unlinking in OA deletes OA's pin. After a bus-s
 **Format:** compact JWS, `alg: EdDSA` (Ed25519), with a `kid` header. The `typ` header separates the two token kinds, so neither can pass as the other: `ob-card+jwt` for a card, and `ob-link+jwt` for a link assertion. A verifier must check `typ`.
 
 Verifier rules, binding on OA:
+
 - Accept only `alg: EdDSA`, and reject anything else, including `none`.
 - `kid` is required.
 - Fetch the JWKS only from the pinned https `iss` plus `/.well-known/jwks.json`: no redirects, with a timeout and a size cap.
@@ -137,6 +141,7 @@ Claims:
 The card leaves out email, namespace and machine id.
 
 **Keys:**
+
 - `ob:setup` generates an Ed25519 key pair and stores it as the Worker secret `CARD_SIGNING_KEY` (a JWK). `CARD_OWNER_SALT` is generated the same way.
 - `GET /.well-known/jwks.json` publishes the current key and the previous one, with `Cache-Control: max-age=3600`. After a rotation, the previous key stays published for at least 24 h and until the next rotation. `--rotate-card-key` refuses to run again within 24 h unless given `--force`.
 - To rotate, run `ob:setup --rotate-card-key`, which demotes the current key to previous. A card signed with the previous key verifies until it expires.

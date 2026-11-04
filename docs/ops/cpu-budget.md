@@ -8,6 +8,7 @@ the bar and how it is measured. Methodology adopted from open-artifacts'
 ## The bar
 
 Two conditions, both required:
+
 1. **Zero CPU-limit kills on the Free plan at realistic load.** Any request the
    runtime stops for CPU (outcome `exceededCpu`, error 1102) fails the bar. The
    hub is built so it cannot get close: WebSocket Hibernation API only, no

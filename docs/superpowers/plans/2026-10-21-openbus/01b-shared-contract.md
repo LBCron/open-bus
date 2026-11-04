@@ -134,9 +134,7 @@ describe("limits", () => {
     expect(utf8Bytes("é")).toBe(2);
     expect(utf8Bytes("🙂")).toBe(4);
     expect(utf8Exceeds("🙂".repeat(9000), LIMITS.inlineBodyBytes)).toBe(true);
-    expect(
-      utf8Exceeds("a".repeat(LIMITS.inlineBodyBytes), LIMITS.inlineBodyBytes),
-    ).toBe(false);
+    expect(utf8Exceeds("a".repeat(LIMITS.inlineBodyBytes), LIMITS.inlineBodyBytes)).toBe(false);
   });
 });
 ```
@@ -159,6 +157,7 @@ it("accepts exactly the three harnesses", () => {
 
 Run: `pnpm --filter @ob/shared test -- src/ids.test.ts`
 Expected: FAIL — `Cannot find module './ids.js'` (or "no such filter" if F1 has not named the package `@ob/shared`; fix the name in `packages/shared/package.json` to `@ob/shared` first).
+
 - [ ] **Step 3: Write the implementation**
 
 `packages/shared/package.json` (mirrors OA's, renamed):
@@ -190,11 +189,7 @@ Expected: FAIL — `Cannot find module './ids.js'` (or "no such filter" if F1 ha
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": { "zod": "^4.6.7" },
-  "devDependencies": {
-    "msw": "^2.15.0",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.12"
-  },
+  "devDependencies": { "msw": "^2.15.0", "typescript": "^5.9.3", "vitest": "^4.1.12" },
   "peerDependencies": { "msw": "^2.15.0" },
   "peerDependenciesMeta": { "msw": { "optional": true } }
 }
@@ -395,10 +390,12 @@ export const STATUS_FOR: Record<ErrorCode, number> = {
 ```
 
 Copy `tsconfig.json` / `tsconfig.typecheck.json` from `openartifacts/packages/shared` unchanged (`composite: true`, `outDir: dist`, `strict`, `module: nodenext`).
+
 - [ ] **Step 4: Run the tests**
 
 Run: `pnpm --filter @ob/shared test -- src/ids.test.ts src/limits.test.ts src/kinds.test.ts`
 Expected: PASS (3 files, 11 tests).
+
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -431,18 +428,8 @@ describe("bus names", () => {
   });
   it("rejects address-shaped, control or oversized names", () => {
     for (const n of [
-      "a@b.com",
-      "host:1234",
-      "a/b",
-      "a\\b",
-      "",
-      " lead",
-      "trail ",
-      "..",
-      ".",
-      "x".repeat(65),
-      "tab\there",
-      "<script>",
+      "a@b.com", "host:1234", "a/b", "a\\b", "", " lead", "trail ",
+      "..", ".", "x".repeat(65), "tab\there", "<script>",
     ]) {
       expect(BusNameSchema.safeParse(n).success).toBe(false);
     }
@@ -482,13 +469,7 @@ describe("normalizeRemote", () => {
     expect(new Set(out)).toEqual(new Set(["github.com/acme/widgets"]));
   });
   it("returns null for local paths and junk", () => {
-    for (const u of [
-      "/Users/me/repo",
-      "../x",
-      "file:///tmp/x",
-      "",
-      "not a url",
-    ]) {
+    for (const u of ["/Users/me/repo", "../x", "file:///tmp/x", "", "not a url"]) {
       expect(normalizeRemote(u)).toBeNull();
     }
   });
@@ -496,26 +477,15 @@ describe("normalizeRemote", () => {
 
 describe("namespaceFrom", () => {
   it("prefers the remote", () => {
-    expect(
-      namespaceFrom({
-        remoteUrl: "git@github.com:A/B.git",
-        gitRootName: "b",
-        cwd: "/x/b",
-      }),
-    ).toBe("github.com/a/b");
+    expect(namespaceFrom({ remoteUrl: "git@github.com:A/B.git", gitRootName: "b", cwd: "/x/b" }))
+      .toBe("github.com/a/b");
   });
   it("falls back to the git root name, then the cwd basename", () => {
-    expect(
-      namespaceFrom({ remoteUrl: null, gitRootName: "Widgets", cwd: "/x/y" }),
-    ).toBe("widgets");
-    expect(
-      namespaceFrom({ remoteUrl: null, gitRootName: null, cwd: "/x/My Repo" }),
-    ).toBe("my-repo");
+    expect(namespaceFrom({ remoteUrl: null, gitRootName: "Widgets", cwd: "/x/y" })).toBe("widgets");
+    expect(namespaceFrom({ remoteUrl: null, gitRootName: null, cwd: "/x/My Repo" })).toBe("my-repo");
   });
   it("never returns an empty namespace", () => {
-    expect(
-      namespaceFrom({ remoteUrl: null, gitRootName: null, cwd: "/" }),
-    ).toBe("default");
+    expect(namespaceFrom({ remoteUrl: null, gitRootName: null, cwd: "/" })).toBe("default");
   });
 });
 ```
@@ -530,17 +500,12 @@ describe(".openbus.json", () => {
   it("is named exactly that", () => expect(CONFIG_FILE).toBe(".openbus.json"));
   it("accepts both keys and neither", () => {
     expect(OpenBusConfigSchema.parse({})).toEqual({});
-    expect(
-      OpenBusConfigSchema.parse({ namespace: "github.com/a/b", global: true }),
-    ).toEqual({ namespace: "github.com/a/b", global: true });
+    expect(OpenBusConfigSchema.parse({ namespace: "github.com/a/b", global: true }))
+      .toEqual({ namespace: "github.com/a/b", global: true });
   });
   it("rejects unknown keys and bad values", () => {
-    expect(OpenBusConfigSchema.safeParse({ global: "yes" }).success).toBe(
-      false,
-    );
-    expect(OpenBusConfigSchema.safeParse({ namespace: "" }).success).toBe(
-      false,
-    );
+    expect(OpenBusConfigSchema.safeParse({ global: "yes" }).success).toBe(false);
+    expect(OpenBusConfigSchema.safeParse({ namespace: "" }).success).toBe(false);
     expect(OpenBusConfigSchema.safeParse({ extra: 1 }).success).toBe(false);
   });
 });
@@ -550,6 +515,7 @@ describe(".openbus.json", () => {
 
 Run: `pnpm --filter @ob/shared test -- src/names.test.ts src/namespace.test.ts src/config.test.ts`
 Expected: FAIL — modules not found.
+
 - [ ] **Step 3: Write the implementation**
 
 `src/names.ts`:
@@ -570,10 +536,7 @@ const NAME_RE = /^[A-Za-z0-9](?:[A-Za-z0-9 ._-]{0,62}[A-Za-z0-9._-])?$/;
 export const BusNameSchema = z
   .string()
   .max(LIMITS.maxBusNameChars)
-  .refine(
-    (s) => NAME_RE.test(s) && s !== "." && s !== "..",
-    "invalid bus name",
-  );
+  .refine((s) => NAME_RE.test(s) && s !== "." && s !== "..", "invalid bus name");
 export type BusName = z.infer<typeof BusNameSchema>;
 
 /** "Base-2": trims the base so the suffix fits inside maxBusNameChars. */
@@ -609,10 +572,8 @@ import { LIMITS } from "./limits.js";
  */
 export function normalizeRemote(remote: string): string | null {
   let s = remote.trim();
-  if (!s || s.startsWith("/") || s.startsWith(".") || s.startsWith("file:"))
-    return null;
-  const scp =
-    /^(?:[^@/\s]+@)?([A-Za-z0-9.-]+\.[A-Za-z]{2,}):(?!\/\/)(.+)$/.exec(s);
+  if (!s || s.startsWith("/") || s.startsWith(".") || s.startsWith("file:")) return null;
+  const scp = /^(?:[^@/\s]+@)?([A-Za-z0-9.-]+\.[A-Za-z]{2,}):(?!\/\/)(.+)$/.exec(s);
   if (scp && !/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) {
     s = `${scp[1]}/${scp[2]}`;
   } else {
@@ -631,8 +592,7 @@ export function normalizeRemote(remote: string): string | null {
     .replace(/\/+$/, "")
     .replace(/\/{2,}/g, "/")
     .replace(/^www\./, "");
-  if (!/^[a-z0-9.-]+\.[a-z]{2,}\/[a-z0-9._\/-]*[a-z0-9._-]$/.test(s))
-    return null;
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}\/[a-z0-9._\/-]*[a-z0-9._-]$/.test(s)) return null;
   return s.slice(0, LIMITS.maxNamespaceChars);
 }
 
@@ -694,20 +654,20 @@ export type OpenBusConfig = z.infer<typeof OpenBusConfigSchema>;
 export function mergeConfigs(configs: OpenBusConfig[]): OpenBusConfig {
   const out: OpenBusConfig = {};
   for (const c of configs) {
-    if (out.namespace === undefined && c.namespace !== undefined)
-      out.namespace = c.namespace;
-    if (out.global === undefined && c.global !== undefined)
-      out.global = c.global;
+    if (out.namespace === undefined && c.namespace !== undefined) out.namespace = c.namespace;
+    if (out.global === undefined && c.global !== undefined) out.global = c.global;
   }
   return out;
 }
 ```
 
 Append to `src/index.ts`: `export * from "./config.js"; export * from "./names.js"; export * from "./namespace.js";`
+
 - [ ] **Step 4: Run the tests**
 
 Run: `pnpm --filter @ob/shared test -- src/names.test.ts src/namespace.test.ts src/config.test.ts`
 Expected: PASS (3 files, 12 tests).
+
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -743,90 +703,34 @@ const id = "7Yb3kQmZ1xRt9PvA";
 
 describe("frames", () => {
   it("round-trips a send and a deliver", () => {
-    const send = {
-      v: 1,
-      id,
-      type: "send",
-      from_ref: "s1",
-      to_name: "OpenBus Backend",
-      body: "hi",
-    } as const;
+    const send = { v: 1, id, type: "send", from_ref: "s1", to_name: "OpenBus Backend", body: "hi" } as const;
     expect(decodeFrame(encodeFrame(send))).toEqual(send);
     const deliver = {
-      v: 1,
-      id,
-      type: "deliver",
-      msg_id: "aaaaaaaaaaaaaaaa",
-      to_ref: "s1",
-      from_name: "Pi",
-      namespace: "github.com/a/b",
-      body: "hi",
+      v: 1, id, type: "deliver", msg_id: "aaaaaaaaaaaaaaaa", to_ref: "s1",
+      from_name: "Pi", namespace: "github.com/a/b", body: "hi",
     } as const;
     expect(decodeFrame(encodeFrame(deliver))).toEqual(deliver);
   });
   it("round-trips an oversized notice", () => {
     const f = {
-      v: 1,
-      id,
-      type: "deliver",
-      msg_id: "aaaaaaaaaaaaaaaa",
-      to_ref: "s1",
-      from_name: "Pi",
-      namespace: "n",
-      notice: { size: 40000, msg_id: "aaaaaaaaaaaaaaaa" },
+      v: 1, id, type: "deliver", msg_id: "aaaaaaaaaaaaaaaa", to_ref: "s1",
+      from_name: "Pi", namespace: "n", notice: { size: 40000, msg_id: "aaaaaaaaaaaaaaaa" },
     } as const;
     expect(decodeFrame(encodeFrame(f))).toEqual(f);
   });
   it("round-trips a refusal", () => {
-    const f = {
-      v: 1,
-      id,
-      type: "refuse",
-      msg_id: "aaaaaaaaaaaaaaaa",
-      reason: "closed",
-      detail: "denied",
-    } as const;
+    const f = { v: 1, id, type: "refuse", msg_id: "aaaaaaaaaaaaaaaa", reason: "closed", detail: "denied" } as const;
     expect(decodeFrame(encodeFrame(f))).toEqual(f);
     expect(decodeFrame(JSON.stringify({ ...f, detail: "held" }))).toBeNull();
-    expect(
-      decodeFrame(JSON.stringify({ ...f, reason: "inbox_full" })),
-    ).toBeNull();
+    expect(decodeFrame(JSON.stringify({ ...f, reason: "inbox_full" }))).toBeNull();
   });
   it("rejects unknown types, wrong versions and extra keys", () => {
     expect(decodeFrame(JSON.stringify({ v: 1, id, type: "nope" }))).toBeNull();
-    expect(
-      decodeFrame(
-        JSON.stringify({
-          v: 2,
-          id,
-          type: "hello",
-          machine_label: "m",
-          client_version: "0.1.0",
-        }),
-      ),
-    ).toBeNull();
-    expect(
-      decodeFrame(
-        JSON.stringify({
-          v: 1,
-          id,
-          type: "hello",
-          machine_label: "m",
-          client_version: "0.1.0",
-          x: 1,
-        }),
-      ),
-    ).toBeNull();
+    expect(decodeFrame(JSON.stringify({ v: 2, id, type: "hello", machine_label: "m", client_version: "0.1.0" }))).toBeNull();
+    expect(decodeFrame(JSON.stringify({ v: 1, id, type: "hello", machine_label: "m", client_version: "0.1.0", x: 1 }))).toBeNull();
   });
   it("rejects a body over the hard maximum and a bare ping", () => {
-    const big = {
-      v: 1,
-      id,
-      type: "send",
-      from_ref: "s1",
-      to_name: "a",
-      body: "x".repeat(LIMITS.maxMessageBytes + 1),
-    };
+    const big = { v: 1, id, type: "send", from_ref: "s1", to_name: "a", body: "x".repeat(LIMITS.maxMessageBytes + 1) };
     expect(decodeFrame(JSON.stringify(big))).toBeNull();
     expect(decodeFrame("ping")).toBeNull();
   });
@@ -834,28 +738,8 @@ describe("frames", () => {
     expect(decodeFrame("x".repeat(LIMITS.maxMessageBytes + 2048))).toBeNull();
   });
   it("names every frame the overview pins", () => {
-    expect(CLIENT_FRAMES).toEqual([
-      "hello",
-      "agent_up",
-      "agent_down",
-      "sessions",
-      "send",
-      "ack",
-      "refuse",
-      "list",
-      "fetch",
-    ]);
-    expect(SERVER_FRAMES).toEqual([
-      "hello_ok",
-      "agent_ok",
-      "receipt",
-      "roster",
-      "body",
-      "error",
-      "deliver",
-      "receipt_update",
-      "roster_changed",
-    ]);
+    expect(CLIENT_FRAMES).toEqual(["hello", "agent_up", "agent_down", "sessions", "send", "ack", "refuse", "list", "fetch"]);
+    expect(SERVER_FRAMES).toEqual(["hello_ok", "agent_ok", "receipt", "roster", "body", "error", "deliver", "receipt_update", "roster_changed"]);
   });
   it("formats a rejection with the frame id when there is one", () => {
     expect(formatFrameError("bad frame", null)).toBe("bad frame");
@@ -868,69 +752,24 @@ describe("frames", () => {
 
 ```ts
 import { describe, expect, it } from "vitest";
-import {
-  ReceiptSchema,
-  RECEIPT_STATES,
-  REFUSAL_REASONS,
-  receiptLabel,
-} from "./receipts.js";
+import { ReceiptSchema, RECEIPT_STATES, REFUSAL_REASONS, receiptLabel } from "./receipts.js";
 
 describe("receipts", () => {
   it("pins states and refusal reasons", () => {
-    expect(RECEIPT_STATES).toEqual([
-      "pending",
-      "delivered",
-      "expired",
-      "refused",
-    ]);
+    expect(RECEIPT_STATES).toEqual(["pending", "delivered", "expired", "refused"]);
     expect(REFUSAL_REASONS).toEqual([
-      "unknown_agent",
-      "closed",
-      "inbox_full",
-      "too_large",
-      "other_namespace",
-      "revoked",
-      "ambiguous",
+      "unknown_agent", "closed", "inbox_full", "too_large", "other_namespace", "revoked", "ambiguous",
     ]);
   });
   it("allows a reason on refused and on expired, never on delivered", () => {
-    expect(
-      ReceiptSchema.safeParse({
-        msg_id: "a".repeat(16),
-        state: "refused",
-        reason: "inbox_full",
-      }).success,
-    ).toBe(true);
-    expect(
-      ReceiptSchema.safeParse({
-        msg_id: "a".repeat(16),
-        state: "expired",
-        reason: "recipient_closed",
-      }).success,
-    ).toBe(true);
-    expect(
-      ReceiptSchema.safeParse({ msg_id: "a".repeat(16), state: "delivered" })
-        .success,
-    ).toBe(true);
-    expect(
-      ReceiptSchema.safeParse({
-        msg_id: "a".repeat(16),
-        state: "pending",
-        reason: "closed",
-      }).success,
-    ).toBe(false);
+    expect(ReceiptSchema.safeParse({ msg_id: "a".repeat(16), state: "refused", reason: "inbox_full" }).success).toBe(true);
+    expect(ReceiptSchema.safeParse({ msg_id: "a".repeat(16), state: "expired", reason: "recipient_closed" }).success).toBe(true);
+    expect(ReceiptSchema.safeParse({ msg_id: "a".repeat(16), state: "delivered" }).success).toBe(true);
+    expect(ReceiptSchema.safeParse({ msg_id: "a".repeat(16), state: "pending", reason: "closed" }).success).toBe(false);
   });
   it("has a label for every reason", () => {
-    expect(
-      receiptLabel({
-        msg_id: "a".repeat(16),
-        state: "refused",
-        reason: "closed",
-      }),
-    ).toBe("refused: closed");
-    expect(receiptLabel({ msg_id: "a".repeat(16), state: "pending" })).toBe(
-      "pending",
-    );
+    expect(receiptLabel({ msg_id: "a".repeat(16), state: "refused", reason: "closed" })).toBe("refused: closed");
+    expect(receiptLabel({ msg_id: "a".repeat(16), state: "pending" })).toBe("pending");
   });
 });
 ```
@@ -939,6 +778,7 @@ describe("receipts", () => {
 
 Run: `pnpm --filter @ob/shared test -- src/protocol.test.ts src/receipts.test.ts`
 Expected: FAIL — modules not found.
+
 - [ ] **Step 3: Write the implementation**
 
 `src/receipts.ts`:
@@ -947,12 +787,7 @@ Expected: FAIL — modules not found.
 import { z } from "zod";
 import { newMsgId } from "./ids.js";
 
-export const RECEIPT_STATES = [
-  "pending",
-  "delivered",
-  "expired",
-  "refused",
-] as const;
+export const RECEIPT_STATES = ["pending", "delivered", "expired", "refused"] as const;
 export const ReceiptStateSchema = z.enum(RECEIPT_STATES);
 export type ReceiptState = z.infer<typeof ReceiptStateSchema>;
 
@@ -969,10 +804,7 @@ export const RefusalReasonSchema = z.enum(REFUSAL_REASONS);
 export type RefusalReason = z.infer<typeof RefusalReasonSchema>;
 
 /** `recipient_closed` is the hub's expiry reason on reconnect; not a send refusal. */
-export const ReceiptReasonSchema = z.union([
-  RefusalReasonSchema,
-  z.literal("recipient_closed"),
-]);
+export const ReceiptReasonSchema = z.union([RefusalReasonSchema, z.literal("recipient_closed")]);
 export type ReceiptReason = z.infer<typeof ReceiptReasonSchema>;
 
 export const MsgIdSchema = z.string().regex(/^[1-9A-HJ-NP-Za-km-z]{16}$/);
@@ -990,13 +822,9 @@ export const ReceiptSchema = z
   })
   .refine(
     (r) =>
-      (r.state === "refused" &&
-        r.reason !== undefined &&
-        r.reason !== "recipient_closed") ||
-      (r.state === "expired" &&
-        (r.reason === undefined || r.reason === "recipient_closed")) ||
-      ((r.state === "pending" || r.state === "delivered") &&
-        r.reason === undefined),
+      (r.state === "refused" && r.reason !== undefined && r.reason !== "recipient_closed") ||
+      (r.state === "expired" && (r.reason === undefined || r.reason === "recipient_closed")) ||
+      ((r.state === "pending" || r.state === "delivered") && r.reason === undefined),
     "reason does not match state",
   );
 export type Receipt = z.infer<typeof ReceiptSchema>;
@@ -1014,11 +842,7 @@ import { AgentRefSchema } from "./refs.js"; // see below
 import { AgentKindSchema } from "./kinds.js";
 import { LIMITS, utf8Exceeds } from "./limits.js";
 import { BusNameSchema, NamespaceSchema } from "./names.js";
-import {
-  MsgIdSchema,
-  ReceiptReasonSchema,
-  ReceiptStateSchema,
-} from "./receipts.js";
+import { MsgIdSchema, ReceiptReasonSchema, ReceiptStateSchema } from "./receipts.js";
 import { newId } from "./ids.js";
 
 export const PROTOCOL_VERSION = 1;
@@ -1048,11 +872,7 @@ const AgentUp = z.strictObject({
   global: z.boolean(),
 });
 
-const AgentDown = z.strictObject({
-  ...base,
-  type: z.literal("agent_down"),
-  agent_ref: AgentRefSchema,
-});
+const AgentDown = z.strictObject({ ...base, type: z.literal("agent_down"), agent_ref: AgentRefSchema });
 
 const Sessions = z.strictObject({
   ...base,
@@ -1069,11 +889,7 @@ const Send = z.strictObject({
   body: BodySchema,
 });
 
-const Ack = z.strictObject({
-  ...base,
-  type: z.literal("ack"),
-  msg_id: MsgIdSchema,
-});
+const Ack = z.strictObject({ ...base, type: z.literal("ack"), msg_id: MsgIdSchema });
 
 /**
  * The harness did not take the message (Claude `peer_message_status`, a failed
@@ -1088,17 +904,8 @@ const Refuse = z.strictObject({
   reason: z.literal("closed"),
   detail: z.enum(["denied", "refused", "expired", "dropped"]),
 });
-const List = z.strictObject({
-  ...base,
-  type: z.literal("list"),
-  from_ref: AgentRefSchema,
-});
-const Fetch = z.strictObject({
-  ...base,
-  type: z.literal("fetch"),
-  from_ref: AgentRefSchema,
-  msg_id: MsgIdSchema,
-});
+const List = z.strictObject({ ...base, type: z.literal("list"), from_ref: AgentRefSchema });
+const Fetch = z.strictObject({ ...base, type: z.literal("fetch"), from_ref: AgentRefSchema, msg_id: MsgIdSchema });
 
 const HelloOk = z.strictObject({
   ...base,
@@ -1108,12 +915,7 @@ const HelloOk = z.strictObject({
   server_version: z.string(),
 });
 
-const AgentOk = z.strictObject({
-  ...base,
-  type: z.literal("agent_ok"),
-  agent_ref: AgentRefSchema,
-  bus_name: BusNameSchema,
-});
+const AgentOk = z.strictObject({ ...base, type: z.literal("agent_ok"), agent_ref: AgentRefSchema, bus_name: BusNameSchema });
 
 const ReceiptFrame = z.strictObject({
   ...base,
@@ -1129,53 +931,29 @@ const RosterAgent = z.strictObject({
   namespace: NamespaceSchema,
   global: z.boolean(),
 });
-const Roster = z.strictObject({
-  ...base,
-  type: z.literal("roster"),
-  agents: z.array(RosterAgent).max(500),
-});
+const Roster = z.strictObject({ ...base, type: z.literal("roster"), agents: z.array(RosterAgent).max(500) });
 
-const BodyFrame = z.strictObject({
-  ...base,
-  type: z.literal("body"),
-  msg_id: MsgIdSchema,
-  body: BodySchema,
-});
+const BodyFrame = z.strictObject({ ...base, type: z.literal("body"), msg_id: MsgIdSchema, body: BodySchema });
 
 const ErrorFrame = z.strictObject({
   ...base,
   type: z.literal("error"),
-  code: z.enum([
-    "bad_frame",
-    "not_registered",
-    "not_found",
-    "too_large",
-    "rate_limited",
-    "internal",
-  ]),
+  code: z.enum(["bad_frame", "not_registered", "not_found", "too_large", "rate_limited", "internal"]),
   message: z.string().max(200),
 });
 
-const Notice = z.strictObject({
-  size: z.number().int().positive(),
-  msg_id: MsgIdSchema,
-});
+const Notice = z.strictObject({ size: z.number().int().positive(), msg_id: MsgIdSchema });
 
-const Deliver = z
-  .strictObject({
-    ...base,
-    type: z.literal("deliver"),
-    msg_id: MsgIdSchema,
-    to_ref: AgentRefSchema,
-    from_name: BusNameSchema,
-    namespace: NamespaceSchema,
-    body: BodySchema.optional(),
-    notice: Notice.optional(),
-  })
-  .refine(
-    (f) => (f.body === undefined) !== (f.notice === undefined),
-    "body xor notice",
-  );
+const Deliver = z.strictObject({
+  ...base,
+  type: z.literal("deliver"),
+  msg_id: MsgIdSchema,
+  to_ref: AgentRefSchema,
+  from_name: BusNameSchema,
+  namespace: NamespaceSchema,
+  body: BodySchema.optional(),
+  notice: Notice.optional(),
+}).refine((f) => (f.body === undefined) !== (f.notice === undefined), "body xor notice");
 
 const ReceiptUpdate = z.strictObject({
   ...base,
@@ -1185,76 +963,22 @@ const ReceiptUpdate = z.strictObject({
   reason: ReceiptReasonSchema.optional(),
 });
 
-const RosterChanged = z.strictObject({
-  ...base,
-  type: z.literal("roster_changed"),
-  namespace: NamespaceSchema,
-});
+const RosterChanged = z.strictObject({ ...base, type: z.literal("roster_changed"), namespace: NamespaceSchema });
 
-export const CLIENT_FRAMES = [
-  "hello",
-  "agent_up",
-  "agent_down",
-  "sessions",
-  "send",
-  "ack",
-  "refuse",
-  "list",
-  "fetch",
-] as const;
+export const CLIENT_FRAMES = ["hello", "agent_up", "agent_down", "sessions", "send", "ack", "refuse", "list", "fetch"] as const;
 export const SERVER_FRAMES = [
-  "hello_ok",
-  "agent_ok",
-  "receipt",
-  "roster",
-  "body",
-  "error",
-  "deliver",
-  "receipt_update",
-  "roster_changed",
+  "hello_ok", "agent_ok", "receipt", "roster", "body", "error", "deliver", "receipt_update", "roster_changed",
 ] as const;
 
 export const ClientFrameSchema = z.discriminatedUnion("type", [
-  Hello,
-  AgentUp,
-  AgentDown,
-  Sessions,
-  Send,
-  Ack,
-  Refuse,
-  List,
-  Fetch,
+  Hello, AgentUp, AgentDown, Sessions, Send, Ack, Refuse, List, Fetch,
 ]);
 export const ServerFrameSchema = z.discriminatedUnion("type", [
-  HelloOk,
-  AgentOk,
-  ReceiptFrame,
-  Roster,
-  BodyFrame,
-  ErrorFrame,
-  Deliver,
-  ReceiptUpdate,
-  RosterChanged,
+  HelloOk, AgentOk, ReceiptFrame, Roster, BodyFrame, ErrorFrame, Deliver, ReceiptUpdate, RosterChanged,
 ]);
 export const FrameSchema = z.discriminatedUnion("type", [
-  Hello,
-  AgentUp,
-  AgentDown,
-  Sessions,
-  Send,
-  Ack,
-  Refuse,
-  List,
-  Fetch,
-  HelloOk,
-  AgentOk,
-  ReceiptFrame,
-  Roster,
-  BodyFrame,
-  ErrorFrame,
-  Deliver,
-  ReceiptUpdate,
-  RosterChanged,
+  Hello, AgentUp, AgentDown, Sessions, Send, Ack, Refuse, List, Fetch,
+  HelloOk, AgentOk, ReceiptFrame, Roster, BodyFrame, ErrorFrame, Deliver, ReceiptUpdate, RosterChanged,
 ]);
 
 export type ClientFrame = z.infer<typeof ClientFrameSchema>;
@@ -1291,10 +1015,7 @@ export function decodeFrame(raw: string): Frame | null {
   return r.success ? r.data : null;
 }
 
-export function formatFrameError(
-  message: string,
-  frameId: string | null,
-): string {
+export function formatFrameError(message: string, frameId: string | null): string {
   return frameId ? `${message} (frame ${frameId})` : message;
 }
 ```
@@ -1318,10 +1039,12 @@ export const AgentRefSchema = z
 ```
 
 Append to `src/index.ts`: `export * from "./protocol.js"; export * from "./receipts.js"; export * from "./refs.js";`
+
 - [ ] **Step 4: Run the tests**
 
 Run: `pnpm --filter @ob/shared test -- src/protocol.test.ts src/receipts.test.ts`
 Expected: PASS (2 files, 10 tests). If `decodeFrame("ping")` throws instead of returning null, the JSON.parse guard is missing.
+
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -1360,22 +1083,13 @@ import {
 
 const ISO = "2026-10-21T15:32:52.652Z";
 const machine = {
-  id: "7Yb3kQmZ1xRt9PvA",
-  label: "MacBook",
-  createdAt: ISO,
-  lastUsed: ISO,
-  revokedAt: null,
+  id: "7Yb3kQmZ1xRt9PvA", label: "MacBook",
+  createdAt: ISO, lastUsed: ISO, revokedAt: null,
 };
 const agent = {
-  id: "8Zc4lRnA2ySu0QwB",
-  namespace: "github.com/a/b",
-  name: "OpenBus Backend",
-  kind: "opencode",
-  machineId: machine.id,
-  machineLabel: machine.label,
-  global: false,
-  live: true,
-  updatedAt: ISO,
+  id: "8Zc4lRnA2ySu0QwB", namespace: "github.com/a/b", name: "OpenBus Backend",
+  kind: "opencode", machineId: machine.id, machineLabel: machine.label,
+  global: false, live: true, updatedAt: ISO,
 };
 
 describe("rest", () => {
@@ -1397,59 +1111,31 @@ describe("rest", () => {
     expect(CSRF_HEADER).toBe("X-OB-Request");
   });
   it("validates DTOs with ISO timestamps", () => {
-    expect(
-      MeSchema.parse({
-        user: { id: "owner", email: "o@example.com", name: null },
-      }),
-    ).toBeTruthy();
+    expect(MeSchema.parse({ user: { id: "owner", email: "o@example.com", name: null } })).toBeTruthy();
     expect(MachineSchema.parse(machine)).toBeTruthy();
     expect(MachinesResponseSchema.parse({ machines: [machine] })).toBeTruthy();
     expect(AgentSchema.parse(agent)).toBeTruthy();
     expect(AgentsResponseSchema.parse({ agents: [agent] })).toBeTruthy();
-    expect(MachineSchema.safeParse({ ...machine, createdAt: 1 }).success).toBe(
-      false,
-    );
-    expect(MachineSchema.safeParse({ ...machine, live: true }).success).toBe(
-      false,
-    );
+    expect(MachineSchema.safeParse({ ...machine, createdAt: 1 }).success).toBe(false);
+    expect(MachineSchema.safeParse({ ...machine, live: true }).success).toBe(false);
   });
   it("pins the device flow shapes", () => {
     const code = {
-      device_code: "d".repeat(43),
-      user_code: "AB2C-D3E4",
+      device_code: "d".repeat(43), user_code: "AB2C-D3E4",
       verification_uri: "https://bus.example.com/approve/AB2C-D3E4",
-      expires_in: 600,
-      interval: 5,
+      expires_in: 600, interval: 5,
     };
     expect(DeviceCodeResponseSchema.parse(code)).toBeTruthy();
-    expect(DeviceTokenResponseSchema.parse({ status: "pending" })).toEqual({
-      status: "pending",
-    });
-    expect(
-      DeviceTokenResponseSchema.parse({
-        status: "approved",
-        token: "ob_machine_" + "a".repeat(32),
-        machine_id: machine.id,
-      }),
-    ).toBeTruthy();
-    expect(DeviceTokenResponseSchema.parse({ status: "denied" })).toEqual({
-      status: "denied",
-    });
-    expect(
-      DeviceTokenResponseSchema.safeParse({ status: "approved" }).success,
-    ).toBe(false);
+    expect(DeviceTokenResponseSchema.parse({ status: "pending" })).toEqual({ status: "pending" });
+    expect(DeviceTokenResponseSchema.parse({ status: "approved", token: "ob_machine_" + "a".repeat(32), machine_id: machine.id })).toBeTruthy();
+    expect(DeviceTokenResponseSchema.parse({ status: "denied" })).toEqual({ status: "denied" });
+    expect(DeviceTokenResponseSchema.safeParse({ status: "approved" }).success).toBe(false);
   });
   it("pins the SSE events as full snapshots", () => {
     expect(BusEventSchema.parse({ type: "hello" })).toEqual({ type: "hello" });
-    expect(
-      BusEventSchema.parse({ type: "agents", agents: [agent] }),
-    ).toBeTruthy();
-    expect(
-      BusEventSchema.parse({ type: "machines", machines: [machine] }),
-    ).toBeTruthy();
-    expect(
-      BusEventSchema.safeParse({ type: "roster", agents: [] }).success,
-    ).toBe(false);
+    expect(BusEventSchema.parse({ type: "agents", agents: [agent] })).toBeTruthy();
+    expect(BusEventSchema.parse({ type: "machines", machines: [machine] })).toBeTruthy();
+    expect(BusEventSchema.safeParse({ type: "roster", agents: [] }).success).toBe(false);
     expect(BusEventSchema.safeParse({ type: "ping" }).success).toBe(false);
   });
 });
@@ -1459,6 +1145,7 @@ describe("rest", () => {
 
 Run: `pnpm --filter @ob/shared test -- src/rest.test.ts`
 Expected: FAIL — module not found.
+
 - [ ] **Step 3: Write the implementation**
 
 `src/rest.ts`:
@@ -1476,8 +1163,7 @@ export const CSRF_HEADER = "X-OB-Request";
 
 const ISO = z.string().datetime({ offset: true });
 const seg = (s: string): string => {
-  if (s === "." || s === "..")
-    throw new RangeError(`Unsafe path segment: ${JSON.stringify(s)}`);
+  if (s === "." || s === "..") throw new RangeError(`Unsafe path segment: ${JSON.stringify(s)}`);
   return encodeURIComponent(s);
 };
 
@@ -1531,9 +1217,7 @@ export const MachineSchema = z.strictObject({
 });
 export type Machine = z.infer<typeof MachineSchema>;
 
-export const MachinesResponseSchema = z.strictObject({
-  machines: z.array(MachineSchema),
-});
+export const MachinesResponseSchema = z.strictObject({ machines: z.array(MachineSchema) });
 export type MachinesResponse = z.infer<typeof MachinesResponseSchema>;
 
 export const AgentSchema = z.strictObject({
@@ -1549,13 +1233,9 @@ export const AgentSchema = z.strictObject({
 });
 export type Agent = z.infer<typeof AgentSchema>;
 
-export const AgentsResponseSchema = z.strictObject({
-  agents: z.array(AgentSchema),
-});
+export const AgentsResponseSchema = z.strictObject({ agents: z.array(AgentSchema) });
 export type AgentsResponse = z.infer<typeof AgentsResponseSchema>;
-export const AgentListQuerySchema = z.object({
-  namespace: NamespaceSchema.optional(),
-});
+export const AgentListQuerySchema = z.object({ namespace: NamespaceSchema.optional() });
 
 export const DeviceCodeRequestSchema = z.strictObject({
   machine_label: z.string().min(1).max(LIMITS.maxLabelChars).optional(),
@@ -1574,11 +1254,7 @@ export const DeviceTokenRequestSchema = z.strictObject({
 });
 export const DeviceTokenResponseSchema = z.discriminatedUnion("status", [
   z.strictObject({ status: z.literal("pending") }),
-  z.strictObject({
-    status: z.literal("approved"),
-    token: z.string().regex(/^ob_machine_[1-9A-HJ-NP-Za-km-z]{32}$/),
-    machine_id: IdSchema,
-  }),
+  z.strictObject({ status: z.literal("approved"), token: z.string().regex(/^ob_machine_[1-9A-HJ-NP-Za-km-z]{32}$/), machine_id: IdSchema }),
   z.strictObject({ status: z.literal("denied") }),
   z.strictObject({ status: z.literal("expired") }),
 ]);
@@ -1596,17 +1272,13 @@ export const ApprovalBodySchema = z.strictObject({
  */
 export const BusEventSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("hello") }),
-  z.strictObject({
-    type: z.literal("machines"),
-    machines: z.array(MachineSchema),
-  }),
+  z.strictObject({ type: z.literal("machines"), machines: z.array(MachineSchema) }),
   z.strictObject({ type: z.literal("agents"), agents: z.array(AgentSchema) }),
 ]);
 export type BusEvent = z.infer<typeof BusEventSchema>;
 
 export const newMachineLabel = (hostname: string): string =>
-  hostname.trim().slice(0, LIMITS.maxLabelChars) ||
-  `machine-${newId().slice(0, 6)}`;
+  hostname.trim().slice(0, LIMITS.maxLabelChars) || `machine-${newId().slice(0, 6)}`;
 
 export const isMachineId = isId;
 ```
@@ -1621,10 +1293,12 @@ export const IdSchema = z.string().refine(isId, "invalid id");
 ```
 
 Append to `src/index.ts`: `export * from "./rest.js"; export * from "./schemas.js";`
+
 - [ ] **Step 4: Run the tests**
 
 Run: `pnpm --filter @ob/shared test -- src/rest.test.ts`
 Expected: PASS (1 file, 4 tests).
+
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -1656,29 +1330,18 @@ describe("mocks", () => {
   it("serves me, machines and agents in the FE's shapes", async () => {
     const me = await (await fetch("https://bus.test/api/v1/me")).json();
     expect(me.user.email).toContain("@");
-    const machines = MachinesResponseSchema.parse(
-      await (await fetch("https://bus.test/api/v1/machines")).json(),
-    );
+    const machines = MachinesResponseSchema.parse(await (await fetch("https://bus.test/api/v1/machines")).json());
     expect(machines.machines.length).toBeGreaterThan(0);
     const agents = AgentsResponseSchema.parse(
-      await (
-        await fetch(
-          "https://bus.test/api/v1/agents?namespace=github.com/acme/widgets",
-        )
-      ).json(),
+      await (await fetch("https://bus.test/api/v1/agents?namespace=github.com/acme/widgets")).json(),
     );
-    expect(
-      agents.agents.every(
-        (a) => a.namespace === "github.com/acme/widgets" || a.global,
-      ),
-    ).toBe(true);
+    expect(agents.agents.every((a) => a.namespace === "github.com/acme/widgets" || a.global)).toBe(true);
   });
   it("deletes a machine, then 404s it", async () => {
-    const del = () =>
-      fetch("https://bus.test/api/v1/machines/m1aaaaaaaaaaaaa", {
-        method: "DELETE",
-        headers: { "X-OB-Request": "1" },
-      });
+    const del = () => fetch("https://bus.test/api/v1/machines/m1aaaaaaaaaaaaa", {
+      method: "DELETE",
+      headers: { "X-OB-Request": "1" },
+    });
     expect((await del()).status).toBe(204);
     expect((await del()).status).toBe(404);
   });
@@ -1689,6 +1352,7 @@ describe("mocks", () => {
 
 Run: `pnpm --filter @ob/shared test -- src/mocks/handlers.test.ts`
 Expected: FAIL — module not found. (MSW's node server needs `msw` installed, which F1's root devDependencies already include; if not, add it.)
+
 - [ ] **Step 3: Write the fixtures and handlers**
 
 `src/mocks/fixtures.ts`:
@@ -1699,55 +1363,25 @@ import type { Agent, Machine } from "../rest.js";
 const ISO = "2026-10-21T15:32:52.652Z";
 
 export const machines: Machine[] = [
-  {
-    id: "m1aaaaaaaaaaaaa",
-    label: "MacBook Pro",
-    createdAt: ISO,
-    lastUsed: ISO,
-    revokedAt: null,
-  },
-  {
-    id: "m2aaaaaaaaaaaaa",
-    label: "Studio",
-    createdAt: ISO,
-    lastUsed: null,
-    revokedAt: null,
-  },
+  { id: "m1aaaaaaaaaaaaa", label: "MacBook Pro", createdAt: ISO, lastUsed: ISO, revokedAt: null },
+  { id: "m2aaaaaaaaaaaaa", label: "Studio", createdAt: ISO, lastUsed: null, revokedAt: null },
 ];
 
 export const agents: Agent[] = [
   {
-    id: "a1aaaaaaaaaaaaa",
-    namespace: "github.com/acme/widgets",
-    name: "OpenBus Backend",
-    kind: "opencode",
-    machineId: machines[0]!.id,
-    machineLabel: machines[0]!.label,
-    global: false,
-    live: true,
-    updatedAt: ISO,
+    id: "a1aaaaaaaaaaaaa", namespace: "github.com/acme/widgets", name: "OpenBus Backend",
+    kind: "opencode", machineId: machines[0]!.id, machineLabel: machines[0]!.label,
+    global: false, live: true, updatedAt: ISO,
   },
   {
-    id: "a2aaaaaaaaaaaaa",
-    namespace: "github.com/acme/widgets",
-    name: "Claude",
-    kind: "claude-code",
-    machineId: machines[0]!.id,
-    machineLabel: machines[0]!.label,
-    global: false,
-    live: true,
-    updatedAt: ISO,
+    id: "a2aaaaaaaaaaaaa", namespace: "github.com/acme/widgets", name: "Claude",
+    kind: "claude-code", machineId: machines[0]!.id, machineLabel: machines[0]!.label,
+    global: false, live: true, updatedAt: ISO,
   },
   {
-    id: "a3aaaaaaaaaaaaa",
-    namespace: "github.com/acme/api",
-    name: "Pi",
-    kind: "pi",
-    machineId: machines[1]!.id,
-    machineLabel: machines[1]!.label,
-    global: true,
-    live: false,
-    updatedAt: ISO,
+    id: "a3aaaaaaaaaaaaa", namespace: "github.com/acme/api", name: "Pi",
+    kind: "pi", machineId: machines[1]!.id, machineLabel: machines[1]!.label,
+    global: true, live: false, updatedAt: ISO,
   },
 ];
 ```
@@ -1761,20 +1395,11 @@ import { agents, machines } from "./fixtures.js";
 
 export const handlers = [
   http.get(`*${R.me}`, () =>
-    HttpResponse.json({
-      user: { id: "owner", email: "owner@example.com", name: "Owner" },
-    }),
-  ),
+    HttpResponse.json({ user: { id: "owner", email: "owner@example.com", name: "Owner" } })),
   http.get(`*${R.machines}`, () => HttpResponse.json({ machines })),
   http.delete(`*${R.machine(":id")}`, ({ params }) => {
-    if (
-      typeof params.id !== "string" ||
-      !machines.some((m) => m.id === params.id)
-    )
-      return HttpResponse.json(
-        { error: { code: "not_found", message: "Not found" } },
-        { status: 404 },
-      );
+    if (typeof params.id !== "string" || !machines.some((m) => m.id === params.id))
+      return HttpResponse.json({ error: { code: "not_found", message: "Not found" } }, { status: 404 });
     return new HttpResponse(null, { status: 204 });
   }),
   http.get(`*${R.agents}`, ({ request }) => {
@@ -1787,10 +1412,12 @@ export const handlers = [
 ```
 
 `src/mocks/index.ts`: `export * from "./fixtures.js"; export * from "./handlers.js";`
+
 - [ ] **Step 4: Run the tests and the build**
 
 Run: `pnpm --filter @ob/shared test -- src/mocks/handlers.test.ts && pnpm --filter @ob/shared build`
 Expected: PASS; `dist/index.js`, `dist/index.d.ts`, `dist/mocks/index.js` exist.
+
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -1817,13 +1444,8 @@ import { R } from "./rest.js";
 describe("contract is pinned", () => {
   it("is version 1", () => expect(PROTOCOL_VERSION).toBe(1));
   it("keeps the spec values", () => {
-    expect([
-      LIMITS.inlineBodyBytes,
-      LIMITS.maxMessageBytes,
-      LIMITS.mailTtlSec,
-      LIMITS.inboxCap,
-      LIMITS.revokeCloseCode,
-    ]).toEqual([32768, 1048576, 3600, 50, 4403]);
+    expect([LIMITS.inlineBodyBytes, LIMITS.maxMessageBytes, LIMITS.mailTtlSec, LIMITS.inboxCap, LIMITS.revokeCloseCode])
+      .toEqual([32768, 1048576, 3600, 50, 4403]);
   });
   it("keeps the public routes unversioned and the API under /api/v1", () => {
     expect(R.healthz.startsWith("/api")).toBe(false);
@@ -1835,13 +1457,12 @@ describe("contract is pinned", () => {
 
 - [ ] **Step 2: Write `CONTRACT.md`**
 
-```markdown
+````markdown
 # OpenBus contract (v1)
 
 Owner: Backend. Changes here are announced to the manager and every affected lead before merge.
 
 ## Values
-
 Machine token `ob_machine_` + 32 base58; the hub stores sha256 hex only.
 IDs 16 base58 (`newId`). Device `user_code` 8 chars `[A-Z2-9]` shown `XXXX-XXXX`, 10 min, poll 5 s.
 Inline delivery 32 KB UTF-8; hard max 1 MB; mail expires 3600 s; inbox cap 50.
@@ -1849,7 +1470,6 @@ Receipts `pending|delivered|expired|refused(reason)`; reasons `unknown_agent|clo
 Revoke close code `4403`.
 
 ## Wire (daemon <-> hub, one JSON object per message)
-
 Every frame `{v: 1, id}`; the reply echoes the request id.
 Client: `hello`, `agent_up`, `agent_down`, `sessions`, `send`, `ack`, `refuse`, `list`, `fetch`.
 Server: `hello_ok`, `agent_ok`, `receipt`, `roster`, `body`, `error`, `deliver`, `receipt_update`, `roster_changed`.
@@ -1858,7 +1478,6 @@ Keepalive is the bare string `ping` / `pong`, never a frame.
 `refuse{msg_id, reason:"closed", detail:"denied"|"refused"|"expired"|"dropped"}` closes a pending receipt as `refused: closed` and drops the mail. `held` is not a refusal: the daemon stays silent and acks later.
 
 ## REST
-
 Public: `GET /healthz`, `POST /device/code`, `POST /device/token`.
 Access session: `GET|POST /approve/:user_code`.
 Session cookie: `GET /api/v1/me` (`{user:{id,email,name}}`), `GET /api/v1/machines` (`{machines}`), `DELETE /api/v1/machines/:id` (204, or 404 when unknown or already revoked), `GET /api/v1/agents?namespace=` (`{agents}`), `GET /api/v1/events` (WebSocket since B10-ws, was SSE: `hello|machines|agents`, each frame a complete list).
@@ -1866,16 +1485,16 @@ Bearer machine token: `GET /hub` (upgrade).
 Cookie mutations send `X-OB-Request: 1`. `/auth/dev-login` exists only when ENVIRONMENT=dev.
 
 ## Names and namespaces
-
 Bus name: 1..64, letters/digits/space/._-, no `@ : / \`, not address-shaped.
 Namespace: `host/owner/repo` lowercased, else git root name, else cwd basename, else `default`.
 `.openbus.json` `{namespace?, global?}` from the session's start dir or any parent.
-```
+````
 
 - [ ] **Step 3: Run everything**
 
 Run: `pnpm --filter @ob/shared test && pnpm --filter @ob/shared typecheck && pnpm lint`
 Expected: all tests pass (≈40), `tsc --noEmit` clean, biome clean.
+
 - [ ] **Step 4: Commit and open the PR**
 
 ```bash

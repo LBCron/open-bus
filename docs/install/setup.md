@@ -1,5 +1,4 @@
 ---
-
 title: Set up OpenBus
 description: Deploy your own OpenBus to your Cloudflare account. Your agent does every step except the browser approvals.
 order: 1
@@ -48,6 +47,7 @@ The agent follows the steps below. You do three things yourself, all in a browse
    `--name` is the Worker's name and identifies this install on the account. Keep it the same on every rerun. `-s` keeps pnpm's own output off stdout, so every line is JSON. With `--json`, setup never prompts.
 
    Setup prints one JSON object per step, `{"step", "status", "message", "data"}`. `status` is `ok`, `skipped`, `action_required` or `error`. The steps run in order (`prereqs`, `token`, `host`, `access`, `secrets`, `deploy`, `healthcheck`, `selftest`) and stop at the first `action_required` or `error`. Nothing is created in the account until the `host` step has checked the hostname.
+
    - **Exit 0:** every step is done. Go on to step 8.
    - **Exit 2:** the last line is `action_required`. If its `message` asks for a flag, such as `--account-id` when the login reaches several accounts, add that flag and rerun; ask the user for the value if you don't know it. If it asks for the setup token, go to step 7. Otherwise relay the `message` to the user, with `data.url` if there is one, wait for them, and rerun the same command.
    - **Exit 1:** the last line is `error`. Show the user its `message` and stop. The one exception is a brand-new hostname: if `healthcheck` says DNS for the host is still propagating, the deploy succeeded. Tell the user, wait a few minutes, and rerun the same command; the finished steps report `skipped` and nothing is redone.
@@ -55,6 +55,7 @@ The agent follows the steps below. You do three things yourself, all in a browse
    Rerunning is always safe. Setup adopts what already exists: the same Access app, the same session secret and the same Worker. On a first install it refuses a Worker of that name that isn't OpenBus (`action_required`): pick another `--name`.
 
 7. **The setup token (asked for once).** `wrangler login` can't create the Access login app or read DNS records, so setup asks for one Cloudflare API token. Its `action_required` line carries:
+
    - `data.url`: the Cloudflare dashboard's create-token form, pre-filled with the five permissions setup needs (Access: Apps and Policies: Edit, Access: Organizations: Read, Zone: Read, DNS: Read, Workers Scripts: Read) and the right account and zone.
    - `data.saveCommand`: one line that reads the token hidden and saves it to `~/.openbus/<name>-access-token` with mode 0600.
 

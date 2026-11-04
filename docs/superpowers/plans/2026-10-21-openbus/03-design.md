@@ -35,6 +35,7 @@ git switch -c de/d<N>-<slug> origin/main
 **Execution loop** (overview §"How each lead executes", unchanged): implementer subagent working TDD where there are tests → spec-compliance reviewer → adversarial reviewer ("find inputs, sequences or environments where it breaks, leaks, misleads, or contradicts the spec") → fix until both pass → one PR per task → CI green → merge through the queue → staging smoke → superpowers:verification-before-completion with output pasted.
 
 **Showing the user anything.** Every page the user reads goes to **artifacts.leourbina.com through the `open-artifacts` MCP**, never a localhost companion. Publish rules for this track:
+
 - One artifact per page. `publish_artifact` with `files`: the page plus, when the page links them, `tokens.css` (the contents of `packages/ui/src/tokens/tokens.css`).
 - Publishing rewrites exactly one thing: the stylesheet `href="../../packages/ui/src/tokens/tokens.css"` becomes `href="tokens.css"`. Everything else ships byte-identical to the repo file. A step that publishes says so explicitly.
 - Visibility stays **private**. Never call `set_visibility` without the user asking.
@@ -46,27 +47,27 @@ git switch -c de/d<N>-<slug> origin/main
 
 ## File map
 
-| File                                            | Responsibility                                                                                |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `design/DIRECTION.md`                           | The one record of the visual direction and the `--ob-*` mapping                               |
-| `packages/ui/src/tokens/tokens.css`             | Every CSS custom property, light and dark                                                     |
-| `packages/ui/src/tokens/index.ts`               | The same colors as `tokens`, for tests and code                                               |
-| `packages/ui/src/tokens/terminal.ts`            | The CLI terminal palette and its ANSI fallback                                                |
-| `packages/ui/src/brand/mark.svg`, `favicon.svg` | The minimum brand the pages need                                                              |
-| `packages/ui/test/contrast.test.ts`             | WCAG bars for the tokens                                                                      |
-| `packages/ui/test/sync.test.ts`                 | `tokens.css` and `index.ts` cannot drift                                                      |
-| `packages/ui/test/terminal.test.ts`             | WCAG bars and shape for the terminal palette                                                  |
-| `packages/ui/test/screens.test.ts`              | The device-approval contract (no JS, no external requests, under 8 KB, fixed placeholder set) |
-| `design/screens/device-approval.html`           | The Worker's template, handoff to Backend                                                     |
-| `design/screens/edge-pages.html`                | Expired, denied, unknown and not-you states                                                   |
-| `design/screens/machines.html`                  | Machines page with revoke, handoff to Frontend                                                |
-| `design/screens/live.html`                      | Live agents and namespaces view, handoff to Frontend                                          |
-| `design/screens/README.md`                      | Index: how to view, params, per-screen notes                                                  |
-| `design/cli/PALETTE.md`                         | Terminal palette rules for the client track                                                   |
-| `design/cli/transcript.md`                      | Exact `npx open-bus` output, every state                                                      |
-| `design/cli/npx-open-bus.html`                  | Visual mock of that transcript, light and dark                                                |
-| `design/landing/landing.html`                   | Landing design mock, light and dark                                                           |
-| `apps/landing/**`                               | The Astro landing site and `llms.txt`                                                         |
+| File | Responsibility |
+|---|---|
+| `design/DIRECTION.md` | The one record of the visual direction and the `--ob-*` mapping |
+| `packages/ui/src/tokens/tokens.css` | Every CSS custom property, light and dark |
+| `packages/ui/src/tokens/index.ts` | The same colors as `tokens`, for tests and code |
+| `packages/ui/src/tokens/terminal.ts` | The CLI terminal palette and its ANSI fallback |
+| `packages/ui/src/brand/mark.svg`, `favicon.svg` | The minimum brand the pages need |
+| `packages/ui/test/contrast.test.ts` | WCAG bars for the tokens |
+| `packages/ui/test/sync.test.ts` | `tokens.css` and `index.ts` cannot drift |
+| `packages/ui/test/terminal.test.ts` | WCAG bars and shape for the terminal palette |
+| `packages/ui/test/screens.test.ts` | The device-approval contract (no JS, no external requests, under 8 KB, fixed placeholder set) |
+| `design/screens/device-approval.html` | The Worker's template, handoff to Backend |
+| `design/screens/edge-pages.html` | Expired, denied, unknown and not-you states |
+| `design/screens/machines.html` | Machines page with revoke, handoff to Frontend |
+| `design/screens/live.html` | Live agents and namespaces view, handoff to Frontend |
+| `design/screens/README.md` | Index: how to view, params, per-screen notes |
+| `design/cli/PALETTE.md` | Terminal palette rules for the client track |
+| `design/cli/transcript.md` | Exact `npx open-bus` output, every state |
+| `design/cli/npx-open-bus.html` | Visual mock of that transcript, light and dark |
+| `design/landing/landing.html` | Landing design mock, light and dark |
+| `apps/landing/**` | The Astro landing site and `llms.txt` |
 
 ## Contracts this track owns and consumes
 
@@ -76,15 +77,15 @@ git switch -c de/d<N>-<slug> origin/main
 
 **Pinned values this track must show exactly** (from the overview, do not invent):
 
-| Thing                   | Value                                                                                                       |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Machine token           | `ob_machine_` + 32 base58 chars (show at most 4 trailing chars anywhere)                                    |
-| Device code             | 8 chars `[A-Z2-9]`, shown as `XXXX-XXXX`, expires in 10 minutes                                             |
-| Mail expiry / inbox cap | 1 hour / 50 undelivered                                                                                     |
-| Receipt states          | `pending` \| `delivered` \| `expired` \| `refused`                                                          |
-| Refusal reasons         | `unknown_agent` \| `closed` \| `inbox_full` \| `too_large` \| `other_namespace` \| `revoked` \| `ambiguous` |
-| Revoke close code       | WebSocket `4403`                                                                                            |
-| MCP tools               | `list_agents`, `send_message`, `fetch`, `self`                                                              |
+| Thing | Value |
+|---|---|
+| Machine token | `ob_machine_` + 32 base58 chars (show at most 4 trailing chars anywhere) |
+| Device code | 8 chars `[A-Z2-9]`, shown as `XXXX-XXXX`, expires in 10 minutes |
+| Mail expiry / inbox cap | 1 hour / 50 undelivered |
+| Receipt states | `pending` \| `delivered` \| `expired` \| `refused` |
+| Refusal reasons | `unknown_agent` \| `closed` \| `inbox_full` \| `too_large` \| `other_namespace` \| `revoked` \| `ambiguous` |
+| Revoke close code | WebSocket `4403` |
+| MCP tools | `list_agents`, `send_message`, `fetch`, `self` |
 
 **PR titles for this track:** `docs(ui): …` for `design/` files, `feat(ui): …` for `packages/ui`, `feat(landing): …` for `apps/landing`, each with ` (D<N>)` appended. Branches `de/d<N>-<slug>`.
 
@@ -98,9 +99,11 @@ git switch -c de/d<N>-<slug> origin/main
 - Create: `packages/ui/src/brand/favicon.svg`
 
 There is no decision round. The user adopted Studio verbatim on 2026-10-21 (spec §Visual identity), so D1 is the record, not a proposal.
+
 - [ ] **Step 1: Write `design/DIRECTION.md`.**
 
 Start from `openartifacts/design/DIRECTION.md` and reproduce every table unchanged (type pairing, neutral ramp, accent, radius scale, measured contrasts, notes for D2, rationale). Then make exactly these edits:
+
 1. Replace the H1 and first paragraph with:
 
 ```markdown
@@ -160,10 +163,12 @@ There was no mockup round: OpenBus does not pick its own direction, it inherits 
 ```
 
 The wordmark is not an asset: it is the text "OpenBus" in `--ob-font-mono` at 500 weight with `letter-spacing: -0.01em`. Every page in this track uses that rule.
+
 - [ ] **Step 3: Verify.**
 
 Run: `xmllint --noout packages/ui/src/brand/mark.svg packages/ui/src/brand/favicon.svg && wc -c packages/ui/src/brand/*.svg`
 Expected: no errors, both files under 800 bytes.
+
 - [ ] **Step 4: Commit.**
 
 ```bash
@@ -181,6 +186,7 @@ git commit -m "docs(ui): adopt Studio direction and brand minimum (D1)"
 - Test: `packages/ui/test/contrast.test.ts`, `packages/ui/test/sync.test.ts`
 
 **Prerequisite check:** `ls packages/ui/package.json` exists (F1 scaffold) and `pnpm --filter @ob/ui test` is wired. If F1 named the package differently, use F1's name everywhere below and say so in the contract message. If `packages/ui` does not exist at all, stop and tell `openbus-e0`: F1 has not landed.
+
 - [ ] **Step 1: Write the failing contrast test.**
 
 `packages/ui/test/contrast.test.ts` (this is the whole file):
@@ -291,6 +297,7 @@ describe("tokens.css mirrors tokens", () => {
 
 Run: `pnpm --filter @ob/ui test`
 Expected: FAIL. `contrast.test.ts` and `sync.test.ts` both report `Cannot find module '../src/index'`.
+
 - [ ] **Step 4: Implement the tokens.**
 
 `packages/ui/src/tokens/tokens.css`: copy `openartifacts/packages/ui/src/tokens/tokens.css` exactly, then (a) replace every `--oa-` with `--ob-`, including inside `var(...)`, and (b) replace the opening comment with:
@@ -354,13 +361,16 @@ export default defineConfig({
 ```
 
 `packages/ui/package.json`: keep F1's scaffold and make sure it has `"name": "@ob/ui"`, `"type": "module"`, `"exports": { ".": "./src/index.ts", "./tokens.css": "./src/tokens/tokens.css" }`, `"engines": { "node": ">=22" }`, and `"scripts": { "test": "vitest run" }`. This export map is the contract Frontend and the client track import.
+
 - [ ] **Step 5: Run the tests and see them pass.**
 
 Run: `pnpm --filter @ob/ui test`
 Expected: PASS. 24 `tokens` keys × 2 themes in `contrast.test.ts`, 3 sync checks with 24+24+24 individual comparisons.
+
 - [ ] **Step 6: Announce the contract.**
 
 Send `openbus-e0`, `OpenBus Frontend` and `OpenBus Backend`: "D2 tokens live: import '@ob/ui/tokens.css' or `import { tokens } from '@ob/ui'`. Prefix is `--ob-*`. Tailwind maps them in `@theme` (Frontend owns that mapping; Design owns `packages/ui/src/tokens/*` only)."
+
 - [ ] **Step 7: Commit.**
 
 ```bash
@@ -377,6 +387,7 @@ git commit -m "feat(ui): design tokens (D2)"
 - Test: `packages/ui/test/screens.test.ts`
 
 This is the page the Worker renders at `GET /approve/:user_code` and the states around it. It is not a mockup: Backend copies `device-approval.html` and substitutes placeholders. It must work with no JavaScript, with inlined tokens, under 8 KB (spec §Visual identity).
+
 - [ ] **Step 1: Write the failing contract test.**
 
 `packages/ui/test/screens.test.ts` (this is the whole file):
@@ -385,10 +396,7 @@ This is the page the Worker renders at `GET /approve/:user_code` and the states 
 import { readFileSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const file = new URL(
-  "../../../design/screens/device-approval.html",
-  import.meta.url,
-);
+const file = new URL("../../../design/screens/device-approval.html", import.meta.url);
 const html = readFileSync(file, "utf8");
 
 describe("design/screens/device-approval.html is the Worker's template", () => {
@@ -403,9 +411,7 @@ describe("design/screens/device-approval.html is the Worker's template", () => {
   });
 
   it("offers exactly the approved placeholder set", () => {
-    const used = [
-      ...new Set([...html.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1])),
-    ].sort();
+    const used = [...new Set([...html.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]))].sort();
     expect(used).toEqual([
       "bus_host",
       "client_version",
@@ -436,6 +442,7 @@ describe("design/screens/device-approval.html is the Worker's template", () => {
 
 Run: `pnpm --filter @ob/ui test`
 Expected: FAIL with `ENOENT: design/screens/device-approval.html`.
+
 - [ ] **Step 3: Write `design/screens/device-approval.html`.**
 
 Head: copy the `<!doctype html>` comment pattern of `openartifacts/design/screens/oauth-consent.html`, then `<html lang="en">`, the same `<meta>` block (`viewport`, `robots` `noindex, nofollow`, `referrer` `no-referrer`), `<title>Approve {{machine_label}} · OpenBus</title>`, the two favicon links pointing at `/favicon.svg` and `/favicon.ico` (same-origin, allowed), the two `theme-color` metas (`#EEF0F3` light, `#131518` dark), and then the **entire `<style>` block of `openartifacts/design/screens/oauth-consent.html` unchanged** (its local names `--bg`, `--surface`, `--accent`… already hold the Studio values and are not the `--ob-*` contract). Replace only the comment that opens the file with this one:
@@ -490,22 +497,25 @@ Body (this is the whole `<body>`):
 ```
 
 Copy rules for this page, in force for every later page too: no em dashes anywhere in UI copy; the machine label and the code are the only technical strings shown; "this machine" never becomes "this device" or "your computer".
+
 - [ ] **Step 4: Run the test and see it pass.**
 
 Run: `pnpm --filter @ob/ui test`
 Expected: PASS, all five checks. If the size check fails, cut copy in the `<small>` lines; never cut a permission bullet.
+
 - [ ] **Step 5: Write `design/screens/edge-pages.html`.**
 
 One file, four states, same card and the same `<style>` block copied verbatim from `design/screens/device-approval.html`. It is a preview page for the states Backend renders from the same template with a `state` value, so it shows each state inside a `max-width: 440px` card on the Studio `bg`, each preceded by a `<h2>` label in `--muted` 12px uppercase. State content:
 
-| `state`   | Heading                | Body                                                                                                                                  | Actions                                                    |
-| --------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `expired` | `This code expired`    | `Device codes last 10 minutes. Run npx open-bus on {{machine_label}} again to get a new one.`                                         | one button `Close` (secondary, `type="button"`), no form   |
-| `denied`  | `Machine not approved` | `{{machine_label}} was not added to your bus. Nothing was connected.`                                                                 | one button `Close`                                         |
-| `unknown` | `Unknown code`         | `This approval link is not for any pending machine. If you are adding a machine, run npx open-bus on it and open the link it prints.` | one button `Close`                                         |
-| `not-you` | `Not your bus`         | `You are signed in as {{user_email}}, but this bus belongs to its owner. Sign in as the owner to approve machines.`                   | one primary link `Sign in as the owner` → `{{switch_url}}` |
+| `state` | Heading | Body | Actions |
+|---|---|---|---|
+| `expired` | `This code expired` | `Device codes last 10 minutes. Run npx open-bus on {{machine_label}} again to get a new one.` | one button `Close` (secondary, `type="button"`), no form |
+| `denied` | `Machine not approved` | `{{machine_label}} was not added to your bus. Nothing was connected.` | one button `Close` |
+| `unknown` | `Unknown code` | `This approval link is not for any pending machine. If you are adding a machine, run npx open-bus on it and open the link it prints.` | one button `Close` |
+| `not-you` | `Not your bus` | `You are signed in as {{user_email}}, but this bus belongs to its owner. Sign in as the owner to approve machines.` | one primary link `Sign in as the owner` → `{{switch_url}}` |
 
 Each card keeps the `header` and `foot` from `device-approval.html`. The `{{...}}` placeholders used here are a subset of the approved set; add none.
+
 - [ ] **Step 6: Write `design/screens/README.md`** (the index, grown by every later task):
 
 ```markdown
@@ -529,12 +539,12 @@ Each screen is designed for 1280 px and 390 px wide, with no horizontal page scr
 
 ## Screens
 
-| File                   | Screen                            | Params                                                                                                 | Notes                                                                                          |
-| ---------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| `device-approval.html` | Device approval (Worker template) | none                                                                                                   | No JS, inlined tokens, under 8 KB. Backend substitutes the placeholders in its header comment. |
-| `edge-pages.html`      | Expired, denied, unknown, not-you | `state=expired\|denied\|unknown\|not-you`                                                              | Renders every state at once when the param is omitted.                                         |
-| `machines.html`        | Machines                          | `theme`, `state=default\|empty\|loading\|error`, `menu=none\|row\|confirm`, `toast=none\|revoked`      | Rows with revoke.                                                                              |
-| `live.html`            | Live agents and namespaces        | `theme`, `state=default\|empty\|loading\|error`, `ns=<namespace>\|global`, `filter=none\|live\|closed` | Roster with reachability.                                                                      |
+| File | Screen | Params | Notes |
+|---|---|---|---|
+| `device-approval.html` | Device approval (Worker template) | none | No JS, inlined tokens, under 8 KB. Backend substitutes the placeholders in its header comment. |
+| `edge-pages.html` | Expired, denied, unknown, not-you | `state=expired\|denied\|unknown\|not-you` | Renders every state at once when the param is omitted. |
+| `machines.html` | Machines | `theme`, `state=default\|empty\|loading\|error`, `menu=none\|row\|confirm`, `toast=none\|revoked` | Rows with revoke. |
+| `live.html` | Live agents and namespaces | `theme`, `state=default\|empty\|loading\|error`, `ns=<namespace>\|global`, `filter=none\|live\|closed` | Roster with reachability. |
 
 ## Shared rules
 
@@ -546,6 +556,7 @@ Each screen is designed for 1280 px and 390 px wide, with no horizontal page scr
 - [ ] **Step 7: Publish and screenshot.**
 
 Publish `device-approval.html` (self-contained, no `tokens.css` file needed) and `edge-pages.html` (with `tokens.css` and the href rewrite) to artifacts.leourbina.com, one artifact each, private. Then `proofshot`: light and dark at 1280 px and 390 px of `device-approval.html`, and one capture of `edge-pages.html`. Save to `logs/design/d3-device-approval/`. Send `openbus-e0` both URLs in one line.
+
 - [ ] **Step 8: Commit.**
 
 ```bash
@@ -564,9 +575,11 @@ PR body notes: "Handoff to Backend: `design/screens/device-approval.html` is the
 - Modify: `design/screens/README.md` (row already present; fill `Notes` if changed)
 
 **Copy sources, read first:** `openartifacts/design/screens/settings.html` for row anatomy, the overflow menu and the confirm dialog; `openartifacts/design/screens/library.html` for the app shell (sidebar, header, drawer below 960 px) and the empty state. Reproduce those patterns with `--ob-` tokens and the copy below.
+
 - [ ] **Step 1: Write `design/screens/machines.html`.**
 
 Structure, in order:
+
 1. `<head>`: `<link rel="stylesheet" href="../../packages/ui/src/tokens/tokens.css">`, `<title>Machines · OpenBus</title>`, one small `<style>` block for layout only (no new colors).
 2. **App shell** (from OA `settings.html` / `library.html`, renamed): sidebar with the wordmark rule (Geist Mono 500, "OpenBus") and the `mark.svg` glyph, two `NavItem`s with icons and counts: `Machines` (active, `3`) and `Live` (`5`); at the sidebar's bottom OA's identity row: a 24 px `Avatar`, the user's display name, their email, and a `Sign out` link at its right. No workspace button: this deployment is one owner. Sidebar becomes a drawer below 960 px. Header: breadcrumb `Machines`, and at the right a secondary button `Copy npx open-bus` (copies `npx open-bus`), because adding a machine happens in a terminal, not here.
 3. **Summary line** under the header: `3 machines · 2 live` (mono for the counts), then a `Banner` of tone `info` shown only in `state=default`: `Adding a machine: run npx open-bus on it and approve it in the browser that opens.`
@@ -580,17 +593,18 @@ Structure, in order:
 
 State matrix (every one designed):
 
-| Param   | Value     | What it shows                                                                                                                                                                                                                                                                                                                              |
-| ------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `state` | `default` | 3 rows: `leo-macbook-pro` Live, `leo-mac-mini` Offline, `build-vm-01` Revoked                                                                                                                                                                                                                                                              |
-| `state` | `empty`   | OA `library.html` empty state, centered in the table's place: the `mark.svg` glyph, `h2` `No machines yet`, paragraph `Run npx open-bus on a machine to add it. It opens a browser approval and connects.`, a mono chip `npx open-bus` with a `Copy command` button (OA's "Copy MCP URL" chip), and one primary button `Copy npx open-bus` |
-| `state` | `loading` | 4 skeleton rows at the row height (48 px), no spinner in the table                                                                                                                                                                                                                                                                         |
-| `state` | `error`   | Banner `danger`, title `Couldn't load machines`, body `The bus answered with an error. Nothing changed.`, action `Retry`                                                                                                                                                                                                                   |
-| `menu`  | `row`     | The first non-revoked row's overflow menu open                                                                                                                                                                                                                                                                                             |
-| `menu`  | `confirm` | The confirm dialog open over `state=default`                                                                                                                                                                                                                                                                                               |
-| `toast` | `revoked` | `state=default` with the success toast, and `leo-macbook-pro` shown as `Revoked` in its row                                                                                                                                                                                                                                                |
+| Param | Value | What it shows |
+|---|---|---|
+| `state` | `default` | 3 rows: `leo-macbook-pro` Live, `leo-mac-mini` Offline, `build-vm-01` Revoked |
+| `state` | `empty` | OA `library.html` empty state, centered in the table's place: the `mark.svg` glyph, `h2` `No machines yet`, paragraph `Run npx open-bus on a machine to add it. It opens a browser approval and connects.`, a mono chip `npx open-bus` with a `Copy command` button (OA's "Copy MCP URL" chip), and one primary button `Copy npx open-bus` |
+| `state` | `loading` | 4 skeleton rows at the row height (48 px), no spinner in the table |
+| `state` | `error` | Banner `danger`, title `Couldn't load machines`, body `The bus answered with an error. Nothing changed.`, action `Retry` |
+| `menu` | `row` | The first non-revoked row's overflow menu open |
+| `menu` | `confirm` | The confirm dialog open over `state=default` |
+| `toast` | `revoked` | `state=default` with the success toast, and `leo-macbook-pro` shown as `Revoked` in its row |
 
 Counts in the summary line change with the state: `empty` shows `No machines`.
+
 - [ ] **Step 2: The mock harness.** OA screens carry a `Mockup controls` group fixed at the bottom of the page: one pill radiogroup per param (see `openartifacts/design/screens/settings.html`, bottom of page). Reproduce that pattern. Every screen from D4 on ends `<body>` with this block (it is the mock scaffolding, not part of the handoff UI):
 
 ```html
@@ -646,6 +660,7 @@ Counts in the summary line change with the state: `empty` shows `No machines`.
 ```
 
 Variant markup is marked with attributes, never with classes: `data-show="error"` for a state, `data-show-menu="confirm"`, `data-show-toast="revoked"`, and for `live.html` the same three plus `data-show-ns` and `data-show-filter` (extend `spec` and `render()` with two more pairs of lines each). Screens with params of their own list them in their `<head>` as `<meta name="mock-params" content="menu=none|row|confirm, toast=none|revoked">`. The `.mockbar` styling: fixed bottom center, `--ob-surface` with `--ob-shadow-2`, radius `--ob-radius-md`, 12 px labels, pills as `--ob-surface-2` with `--ob-border-strong` when `aria-checked="true"` (copy OA's mockup-controls styling); it must never overlap the table at 390 px.
+
 - [ ] **Step 3: Show the user.** Publish `machines.html` with `tokens.css` (href rewrite), private. `proofshot`: light and dark at 1280 px and 390 px for `state=default`, plus one capture each of `empty`, `error` and `menu=confirm`, into `logs/design/d4-machines/`. Send `openbus-e0` the URL.
 
 - [ ] **Step 4: Adversarial pass on the screen.** Check, and fix: the `Revoke` pill is always visible and reachable by keyboard alone (never hover-only); the confirm dialog traps the eye on its named machine and can be dismissed with Escape (`aria-modal="true"`, a focusable `Cancel`); `Revoked` rows expose no revoke action; nothing on the page shows a token value (only `Copy machine id`); at 390 px the table becomes stacked rows with no horizontal scroll and the mock controls stay reachable.
@@ -666,6 +681,7 @@ git commit -m "docs(ui): machines screen with revoke (D4)"
 - Modify: `design/screens/README.md` (row already present)
 
 **Copy source:** `design/screens/machines.html` for the app shell and the mock harness (copy the whole `<style>` layout block, the shell markup and the `<script>` block, then change only what this task lists).
+
 - [ ] **Step 1: Write `design/screens/live.html`.**
 
 1. **App shell** as in D4 with `Live` active instead of `Machines`. Header breadcrumb `Live`.
@@ -682,15 +698,16 @@ git commit -m "docs(ui): machines screen with revoke (D4)"
 
 State matrix:
 
-| Param    | Value             | What it shows                                                                                                                                                                                                                                                    |
-| -------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `state`  | `default`         | `ns=openbus`: 5 rows (`openbus-e0` OpenCode Live on `leo-macbook-pro`; `OpenBus Frontend` OpenCode Live; `Bloom Bug Hunter` Claude Code Queued on `leo-mac-mini`; `docs-writer` Pi Closed; `release-bot` OpenCode Live on `build-vm-01`), plus the 2 global rows |
-| `state`  | `empty`           | OA `library.html` empty state, centered: glyph, `h2` `No agents in this namespace`, paragraph `Agents appear here while a session on an approved machine is running.`, action `Show global agents` (secondary)                                                   |
-| `state`  | `loading`         | 5 skeleton rows                                                                                                                                                                                                                                                  |
-| `state`  | `error`           | Banner `danger`, title `Couldn't load the roster`, body `The bus answered with an error.`, action `Retry`                                                                                                                                                        |
-| `ns`     | `medical-wiki`    | 3 rows, its own counts                                                                                                                                                                                                                                           |
-| `ns`     | `global`          | Only the global section, no table                                                                                                                                                                                                                                |
-| `filter` | `live` / `closed` | The table filtered; the chip is `--ob-surface-2` when active                                                                                                                                                                                                     |
+| Param | Value | What it shows |
+|---|---|---|
+| `state` | `default` | `ns=openbus`: 5 rows (`openbus-e0` OpenCode Live on `leo-macbook-pro`; `OpenBus Frontend` OpenCode Live; `Bloom Bug Hunter` Claude Code Queued on `leo-mac-mini`; `docs-writer` Pi Closed; `release-bot` OpenCode Live on `build-vm-01`), plus the 2 global rows |
+| `state` | `empty` | OA `library.html` empty state, centered: glyph, `h2` `No agents in this namespace`, paragraph `Agents appear here while a session on an approved machine is running.`, action `Show global agents` (secondary) |
+| `state` | `loading` | 5 skeleton rows |
+| `state` | `error` | Banner `danger`, title `Couldn't load the roster`, body `The bus answered with an error.`, action `Retry` |
+| `ns` | `medical-wiki` | 3 rows, its own counts |
+| `ns` | `global` | Only the global section, no table |
+| `filter` | `live` / `closed` | The table filtered; the chip is `--ob-surface-2` when active |
+
 - [ ] **Step 2: Show the user.** Publish `live.html` with `tokens.css` (href rewrite), private. `proofshot`: light and dark at 1280 px and 390 px for `state=default`, plus `ns=global`, into `logs/design/d5-live/`. Send `openbus-e0` the URL.
 
 - [ ] **Step 3: Adversarial pass.** Check, and fix: `Queued` is never spelled "Away" or "Idle" anywhere (the receipt vocabulary is `pending/delivered/expired/refused`, and the roster vocabulary is `Live/Queued/Closed`, consistently); the presence dot is never the only signal (each badge has the word); a global agent's row is visually identical in every namespace view; the namespace chips wrap at 390 px rather than scrolling sideways.
@@ -711,6 +728,7 @@ git commit -m "docs(ui): live agents and namespaces screen (D5)"
 - Test: `packages/ui/test/terminal.test.ts`
 
 The `open-bus` CLI is a UI surface (spec §Login). Its colors derive from Studio; its output copy is designed here and implemented by the client track.
+
 - [ ] **Step 1: Write the failing test.**
 
 `packages/ui/test/terminal.test.ts` (this is the whole file):
@@ -744,16 +762,12 @@ describe.each(["light", "dark"] as const)("%s terminal theme", (theme) => {
   it.each(["ink", "muted", "accent", "success", "warning", "danger"])(
     "%s is at least 4.5:1 on bg",
     (key) => {
-      expect(
-        contrast(terminal[key]?.[theme] as string, bg),
-      ).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(terminal[key]?.[theme] as string, bg)).toBeGreaterThanOrEqual(4.5);
     },
   );
 
   it("hairline is at least 1.5:1 on bg", () => {
-    expect(
-      contrast(terminal.hairline?.[theme] as string, bg),
-    ).toBeGreaterThanOrEqual(1.5);
+    expect(contrast(terminal.hairline?.[theme] as string, bg)).toBeGreaterThanOrEqual(1.5);
   });
 });
 
@@ -780,6 +794,7 @@ describe("ANSI fallback", () => {
 
 Run: `pnpm --filter @ob/ui test`
 Expected: FAIL with `Cannot find module '../src/tokens/terminal'`.
+
 - [ ] **Step 3: Implement `packages/ui/src/tokens/terminal.ts`.**
 
 ```ts
@@ -814,6 +829,7 @@ export const terminalAnsi: Record<string, { light: number; dark: number }> = {
 
 Run: `pnpm --filter @ob/ui test`
 Expected: PASS. Add the export to `packages/ui/src/index.ts`: `export { terminal, terminalAnsi } from "./tokens/terminal";`
+
 - [ ] **Step 5: Write `design/cli/PALETTE.md`.** The contract for the client track. It must contain, in this order:
 
 1. **The table.** One row per `terminal` entry: name, light hex, dark hex, the Studio token it comes from, and the one thing it may color (below).
@@ -851,6 +867,7 @@ open-bus 0.1.0
 6. **Hub unreachable:** `! Couldn't reach bus.example.com` + `Retrying in 4 s…` (warning, with the backoff schedule on `--verbose` only).
 
 Roster line format and the trailing block are specified here too: one line per agent after success, `  openbus-e0          OpenCode   leo-macbook-pro   [[success]]live[[/success]]`, columns padded to 20/9/22, status colour per the palette. Add the two honesty rules from the spec to the file: a receipt is never `delivered` before the daemon confirmed the harness accepted the message, and a refused send prints its reason from the pinned list (`unknown_agent`, `closed`, `inbox_full`, `too_large`, `other_namespace`, `revoked`, `ambiguous`).
+
 - [ ] **Step 7: Build `design/cli/npx-open-bus.html`, the visual mock.** A presentation page (not a handoff template): a Studio `bg` page with two terminal frames per state (light and dark), each frame a `--ob-surface`/`terminal.bg` rectangle with `--ob-radius-lg`, a 12 px title bar showing `bash — npx open-bus`, and the transcript in `--ob-font-mono` 13 px with the palette applied to the marked spans. It repeats states 1, 3, 4 and 6 in full and states 2 and 5 as one frame each, at 80 columns, plus a closing strip showing the palette table as colour chips. This file is what the user sees; `transcript.md` is what the client track implements.
 
 - [ ] **Step 8: Publish and screenshot.** Publish `npx-open-bus.html` (self-contained; inline its colours from `terminal.ts`, do not link `tokens.css`), private. `proofshot`: the full page light and dark at 1280 px, and one 390 px capture. Save to `logs/design/d6-cli-palette/`. Send `openbus-e0` the URL.
@@ -874,9 +891,11 @@ git commit -m "feat(ui): terminal palette and npx open-bus transcript (D6)"
 - Test: `apps/landing/test/llms.test.ts`
 
 **Dependencies, stated:** `REPO_URL` from `packages/shared/src/meta.ts` (F2); the four MCP tool names are pinned in the spec; the install procedure must match the setup scripts (client/platform). If those disagree when this task runs, the setup scripts win and the docs change here. `apps/landing` deploys only when the user provides the domain (overview gate "I (landing)"); until then it builds and previews.
+
 - [ ] **Step 1: Write the design mock and show the user.**
 
 `design/landing/landing.html`: one page, Studio, light and dark (the mock harness from `design/screens/machines.html`), 1280 px and 390 px. Sections in order:
+
 1. **Hero:** one sentence, `A bus on your own Cloudflare account that lets every AI agent you run, on any machine, see the others and message them.` Under it, the single CTA as a copyable code chip: `Tell your agent: set up {{SITE_URL}}/llms.txt` with a `Copy` button, and the line `It deploys OpenBus to your Cloudflare account. You only approve in the browser.`
 2. **Three steps**, numbered cards: `1 Tell your agent` (it reads `llms.txt` and runs the setup), `2 Approve in your browser` (sign in with Cloudflare Access, approve each machine), `3 Your agents see each other` (namespaced rosters, messages land in the conversation).
 3. **Screens:** the D3 approval screen and the D5 live screen, cropped and framed at `--ob-radius-lg` with a `--ob-shadow-2`.
@@ -885,6 +904,7 @@ git commit -m "feat(ui): terminal palette and npx open-bus transcript (D6)"
 6. **Footer:** wordmark, `GitHub` link to `REPO_URL`, `llms.txt` link.
 
 Publish it with no `tokens.css` link (its colours are inlined), private, capture light and dark at 1280 px and 390 px, and send `openbus-e0` the URL. **Wait for the user's notes on this mock before Step 2**; if the manager says the mock is approved as-is, continue.
+
 - [ ] **Step 2: Write the failing test.**
 
 `apps/landing/test/llms.test.ts` (this is the whole file):
@@ -900,13 +920,8 @@ const docs = readdirSync(new URL("../src/content/docs", import.meta.url))
 const tools = ["list_agents", "send_message", "fetch", "self"];
 
 // The built pages, imported as text so the test does not need a running site.
-const llms = readFileSync(
-  new URL("../src/pages/llms.txt.ts", import.meta.url),
-  "utf8",
-);
-const source = (await import("../src/pages/llms.txt.ts")) as {
-  GET: () => Response;
-};
+const llms = readFileSync(new URL("../src/pages/llms.txt.ts", import.meta.url), "utf8");
+const source = (await import("../src/pages/llms.txt.ts")) as { GET: () => Response };
 const body = await source.GET().text();
 
 describe("llms.txt", () => {
@@ -938,9 +953,7 @@ describe("llms.txt", () => {
 
   it("links every doc page as .md and nothing else", () => {
     const links = [...body.matchAll(/\(([^)]+\.md)\)/g)].map((m) => m[1]);
-    expect(links.sort()).toEqual(
-      docs.map((d) => `${SITE_URL}/docs/${d}.md`).sort(),
-    );
+    expect(links.sort()).toEqual(docs.map((d) => `${SITE_URL}/docs/${d}.md`).sort());
   });
 });
 ```
@@ -949,6 +962,7 @@ describe("llms.txt", () => {
 
 Run: `pnpm --filter @ob/landing test`
 Expected: FAIL with `Cannot find module '../src/consts'`.
+
 - [ ] **Step 4: Implement `apps/landing`.**
 
 - `src/consts.ts`: `export { REPO_URL } from "@ob/shared"` (F2 owns that package's export map; if `REPO_URL` hangs off another entry point, change this one import and nothing else), plus `export const SITE_URL = "https://github.com/open-artifacts-ai/open-bus/raw/main/apps/landing/public"` as a temporary default, with the header comment "I replaces this with the landing domain when it exists; every consumer takes it from here". `SITE_URL` is always an absolute `https:` URL.
@@ -962,6 +976,7 @@ Expected: FAIL with `Cannot find module '../src/consts'`.
 
 Run: `pnpm --filter @ob/landing test && pnpm --filter @ob/landing build`
 Expected: PASS and a clean Astro build.
+
 - [ ] **Step 6: Lighthouse.**
 
 ```bash
@@ -969,6 +984,7 @@ npx --yes lighthouse@12 http://localhost:4321 --only-categories=performance,acce
 ```
 
 (Start `pnpm --filter @ob/landing preview` first.) Expected: every category ≥ 95. If one is below, fix the page (almost always: heading order, contrast on a muted line, or a missing `alt`).
+
 - [ ] **Step 7: Announce and commit.**
 
 Message `openbus-e0`: "D7 landing + llms.txt built. The install procedure in `apps/landing/src/content/docs/setup.md` is what `llms.txt` tells agents to run; please have the setup owner confirm it matches the scripts. Domain gate stands: the site deploys when the user provides it."
@@ -982,7 +998,7 @@ git commit -m "feat(landing): site, docs, llms.txt (D7)"
 
 ## Milestone: whole-track adversarial review
 
-After D7 (or after D4 if the manager wants an M1 review earlier), run one adversarial review over the whole track with the brief: _"Break the design: find a screen state, copy string, colour pairing or terminal line that misleads the user about what the bus did."_ Known pressure points, each must survive it: the device-approval page names the machine and the code and nothing else; `Revoked` is unmistakable and irreversible-looking; `Queued` never implies delivery; no page prints a token; every screen works at 390 px with no horizontal scroll; every badge carries a word; the transcript never claims `delivered` before confirmation.
+After D7 (or after D4 if the manager wants an M1 review earlier), run one adversarial review over the whole track with the brief: *"Break the design: find a screen state, copy string, colour pairing or terminal line that misleads the user about what the bus did."* Known pressure points, each must survive it: the device-approval page names the machine and the code and nothing else; `Revoked` is unmistakable and irreversible-looking; `Queued` never implies delivery; no page prints a token; every screen works at 390 px with no horizontal scroll; every badge carries a word; the transcript never claims `delivered` before confirmation.
 
 Then report to `openbus-e0` in three lines or fewer: what shipped, what contract changed, what is blocked (expected: the landing domain).
 
@@ -992,16 +1008,15 @@ Then report to `openbus-e0` in three lines or fewer: what shipped, what contract
 
 Spec: `docs/superpowers/specs/2026-10-29-agent-card-design.md` (Delivery row 6). Frontend's behavior and copy: `04-frontend.md` Part 2 (#292). Options page for the user: https://artifacts.leourbina.com/a/Z9ZvBeNzmAGftQrM
 
-**Files:** create `design/screens/roles.html`, `design/screens/link-confirm.html`; modify `design/screens/live.html` (status column, role badge), `design/screens/README.md`. The Linked apps section goes in a new `design/screens/settings.html`.
-1. Publish options (done): roles (page or panel), status (column or inline), linked apps (Settings or Machines), link confirm (full or minimal). Recommended: Roles page, status column, Settings › Linked apps, full confirm.
+**Files:** create `design/screens/settings.html` (Linked apps), `design/screens/link-confirm.html`; modify `design/screens/live.html` (status column), `design/screens/README.md`, `packages/ui/scripts/build-screens.mjs` (builds `settings.css`), `packages/ui/test/screens.test.ts`. Roles are dropped (#340, removal in #394): no roles screen, no role badge; agents show by session name (renameable later, #393).
+
+1. Publish options (done): status (column or inline), linked apps (Settings or Machines), link confirm (full or minimal). Picked: 2A status column, 3A Settings › Linked apps, 4A full confirm. The roles question is moot since #340.
 2. On the user's pick, build the screens at 1280 and 390 px, in light and dark, with the states Frontend's tests need:
-   - roles: default, empty, Vacant, the add and re-point dialogs, a 400 error inside the dialog, the remove confirm;
    - status: every state, a 64-character label, no status, an unknown state;
-   - linked apps: default, empty, the unlink confirm, a punycode `aud` and an `aud` with a port;
+   - linked apps: default, empty, loading, error, the unlink confirm and its toast, a punycode `aud` and an `aud` with a port;
    - link confirm: under 8 KB when filled at maximum lengths, with no JavaScript.
 3. Rules:
    - Status is never colour alone, and is always tagged "agent says". It uses a dashed, unfilled pill so it never reads as the attested Reachable badge.
-   - Vacant uses the warning colour plus the word.
    - Every `aud` is shown whole, in mono, inside `<bdi>`, and never as a link.
    - No em dashes, including as the empty placeholder (use "None").
 4. Hand off to Frontend (AC6.2 to AC6.5). Review FE's PRs against the screens.

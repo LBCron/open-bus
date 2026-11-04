@@ -6,7 +6,9 @@
     "connected": true,
     "firstLine": "{\"msgV\":1,\"msg_id\":\"36b9baf8-484a-4be3-ab6b-e15f9f728288\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<cross-session-message from=\\\"uds:/tmp/cc-socks/56291.sock\\\" hop-chain=\\\"c560011ea111d0f3433d9175\\\" from-name=\\\"ob-claude-cmsig0-4a\\\" from-mode=\\\"bypass\\\">\\nOPENBUS-PROBE-OK\\n</cross-session-message>\"},\"priority\":\"next\",\"from\":\"uds:/tmp/cc-socks/56291.sock\"}",
     "authTokenMatches": null,
-    "frameTypes": ["user"]
+    "frameTypes": [
+      "user"
+    ]
   },
   {
     "variant": "key-only",
@@ -15,7 +17,9 @@
     "connected": true,
     "firstLine": "{\"msgV\":1,\"msg_id\":\"1f7f267f-f344-4d30-afb5-dfc81f71d3e4\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<cross-session-message from=\\\"uds:/tmp/cc-socks/56291.sock\\\" hop-chain=\\\"c560011ea111d0f3433d9175\\\" from-name=\\\"ob-claude-cmsig0-4a\\\" from-mode=\\\"bypass\\\">\\nOPENBUS-PROBE-OK\\n</cross-session-message>\"},\"priority\":\"next\",\"from\":\"uds:/tmp/cc-socks/56291.sock\"}",
     "authTokenMatches": null,
-    "frameTypes": ["user"]
+    "frameTypes": [
+      "user"
+    ]
   },
   {
     "variant": "control",
@@ -24,6 +28,8 @@
     "connected": true,
     "firstLine": "{\"msgV\":1,\"msg_id\":\"36924368-7e85-4df1-a394-4fffd6bac416\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<cross-session-message from=\\\"uds:/tmp/cc-socks/56291.sock\\\" hop-chain=\\\"c560011ea111d0f3433d9175\\\" from-name=\\\"ob-claude-cmsig0-4a\\\" from-mode=\\\"bypass\\\">\\nOPENBUS-PROBE-OK\\n</cross-session-message>\"},\"priority\":\"next\",\"from\":\"uds:/tmp/cc-socks/56291.sock\"}",
     "authTokenMatches": null,
-    "frameTypes": ["user"]
+    "frameTypes": [
+      "user"
+    ]
   }
 ]

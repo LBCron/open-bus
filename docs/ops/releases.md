@@ -14,6 +14,7 @@ still in review, put the `release-hold` label on the release PR:
     gh pr edit <release PR> --add-label release-hold
 
 While the label is on:
+
 - `plan` does not arm the PR.
 - `arm` re-reads the labels right before it enqueues, so a hold set during a
   run still wins.
@@ -35,6 +36,7 @@ issue, as a reminder that the hold is on.
 The agent card (spec `2026-10-29-agent-card-design.md`) uses three Worker
 secrets. Setup adds them to any Worker that lacks them: on install, on a
 plain rerun, and on the CI upgrade, which preflight allows.
+
 - **`CARD_SIGNING_KEY`** is the Ed25519 private key that signs cards and link
   assertions. Its `kid` (`ob-<UTC time>-<hex>`) records when it was made.
 - **`CARD_SIGNING_KEY_PREV`** is the previous key's public half, so cards
